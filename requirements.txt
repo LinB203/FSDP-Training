@@ -1,0 +1,7 @@
+flash-attn==2.7.1.post4
+sentencepiece==0.1.99
+tokenizers==0.21.1
+torch==2.7.1+cu126
+torchaudio==2.7.1+cu126
+torchvision==0.22.1+cu126
+transformers==4.55.2
