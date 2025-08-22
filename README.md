@@ -23,7 +23,7 @@ torchrun \
   --lr 1e-4
 ```
 
-## FSDP+TP
+## FSDP+TP+SP
 
 TP for MLP, SP for all norm layers
 
@@ -39,6 +39,12 @@ torchrun \
   --seq_len 1024 \
   --lr 1e-4
 ```
+
+## TODO
+
+### sp@attn_head
+
+### tp@qkvo_proj
 
 ## References
 
