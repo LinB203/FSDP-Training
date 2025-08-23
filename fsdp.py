@@ -15,26 +15,9 @@ from torch.distributed.fsdp import (
     FSDPModule,
 )
 # Import your model definition here
-from transformers import Qwen3ForCausalLM, Qwen2Tokenizer
-from transformers.models.qwen3.modeling_qwen3 import Qwen3DecoderLayer, Qwen3RMSNorm
+from model import Transformer, ModelArgs, RMSNorm, TransformerBlock
 from utils.checkpoint import Checkpointer
-
-from utils.log_utils import rank_log, get_logger
-
-# Simple random dataset
-class RandomTokenDataset(Dataset):
-    def __init__(self, seq_len, dataset_size, vocab_size):
-        self.seq_len = seq_len
-        self.dataset_size = dataset_size
-        self.vocab_size = vocab_size
-
-    def __len__(self):
-        return self.dataset_size
-
-    def __getitem__(self, idx):
-        # generate random token sequence and target (shifted by 1)
-        tokens = torch.randint(0, self.vocab_size, (self.seq_len,), dtype=torch.long)
-        return tokens[:-1], tokens[1:]
+from utils.log_utils import rank_log, get_logger, verify_min_gpu_count
 
 def setup_distributed_env():
     dist.init_process_group(backend="cuda:nccl,cpu:gloo")
@@ -57,27 +40,32 @@ def train(args):
 
     device = torch.device(f"cuda:{local_rank}" if torch.cuda.is_available() and world_size > 1 else "cuda" if torch.cuda.is_available() else "cpu")
 
-    model_name = "/mnt/data/checkpoints/Qwen/Qwen3-14B"
-    model = Qwen3ForCausalLM.from_pretrained(
-        model_name,
-        attn_implementation="sdpa",
-        torch_dtype=torch.bfloat16,
-        device_map="cpu"
-    )
-    # model.forward = torch.compile(model.forward)
-    model._set_gradient_checkpointing(True)
-    model.gradient_checkpointing_enable({"use_reentrant": False})
+    # test
+    # simple_model_config = ModelArgs(
+    #     dim=4096, n_layers=2, n_heads=32, n_kv_heads=8, vocab_size=151936
+    #     )
+    # 7B
+    # simple_model_config = ModelArgs(
+    #     dim=4096, n_layers=36, n_heads=32, n_kv_heads=8, vocab_size=151936
+    #     )
+    # 13B
+    simple_model_config = ModelArgs(
+        dim=5120, n_layers=40, n_heads=40, n_kv_heads=8, vocab_size=151936
+        )
+    # 32B
+    # simple_model_config = ModelArgs(
+    #     dim=5120, n_layers=64, n_heads=64, n_kv_heads=8, vocab_size=151936
+    #     )
+    model = Transformer.from_model_args(simple_model_config)
+    model.gradient_checkpointing = True
     model.train()
-    rank_log(global_rank, logger, f'model.dtype: {model.dtype}')
-    rank_log(global_rank, logger, f"init meta Memory allocated: {torch.cuda.memory_allocated() / 1024**3:.2f} GiB")
+    rank_log(global_rank, logger, f"init model Memory allocated: {torch.cuda.memory_allocated() / 1024**3:.2f} GiB")
 
     total_params = sum(p.numel() for p in model.parameters())
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
     rank_log(global_rank, logger, f"Total parameters: {total_params:,}")
     rank_log(global_rank, logger, f"Trainable parameters: {trainable_params:,}")
-
-    tokenizer = Qwen2Tokenizer.from_pretrained(model_name)
 
 
     cpu_offload = False
@@ -92,8 +80,7 @@ def train(args):
         output_dtype=torch.bfloat16, 
     )
     def shard_module(mod, **fsdp_kwargs):
-        if isinstance(mod, (Qwen3RMSNorm)):
-            # print(f'here mod: {mod} should be Qwen3RMSNorm')
+        if isinstance(mod, (RMSNorm)):
             return fully_shard(mod, mp_policy=mp_policy_fp32, **fsdp_kwargs)
         else:
             return fully_shard(mod, mp_policy=mp_policy_bf16, **fsdp_kwargs)
@@ -107,10 +94,10 @@ def train(args):
         fsdp_kwargs["offload_policy"] = CPUOffloadPolicy()
 
     for module in model.modules():
-        if isinstance(module, Qwen3RMSNorm):
+        if isinstance(module, RMSNorm):
             shard_module(module, **fsdp_kwargs)
     for module in model.modules():
-        if isinstance(module, Qwen3DecoderLayer):
+        if isinstance(module, TransformerBlock):
             shard_module(module, **fsdp_kwargs)
     shard_module(model, **fsdp_kwargs)
     rank_log(global_rank, logger, f"fully_shard Memory allocated: {torch.cuda.memory_allocated() / 1024**3:.2f} GiB")
@@ -128,49 +115,28 @@ def train(args):
         checkpointer.load_optim(model, optimizer)
         rank_log(global_rank, logger, f'resume model...')
 
-    # dataset and loader
-    dataset = RandomTokenDataset(seq_len=args.seq_len + 1, dataset_size=args.size, vocab_size=model.vocab_size)
-    sampler = torch.utils.data.distributed.DistributedSampler(dataset) if world_size > 1 else None
-    loader = DataLoader(dataset, batch_size=args.batch_size, sampler=sampler)
 
-
-    # dtype_records = {}
-    # def hook_fn(module, inputs, output):
-    #     dtype_records[module] = {
-    #         'input_dtype':  inputs[0].dtype,
-    #         # 'weight_dtype': module.weight.dtype,
-    #         'output_dtype': output[0].dtype if isinstance(output, tuple) else output.dtype,
-    #     }
-
-    # for mod in model.modules():
-    #     if isinstance(mod, (Qwen2RMSNorm)) or isinstance(mod, (Qwen2DecoderLayer)):
-    #         print(f'hook to {mod}')
-    #         mod.register_forward_hook(hook_fn)
-
+    # Training loop:
+    # Perform a num of iterations of forward/backward
+    # and optimizations for the sharded module.
+    rank_log(global_rank, logger, "\nStarting 2D training...")
+    num_iterations = args.size
+    batch_size = args.batch_size
 
     for epoch in range(args.epochs):
-        if sampler:
-            sampler.set_epoch(epoch)
-        for batch_idx, (inputs, targets) in enumerate(tqdm(loader)):
-            inputs = inputs.to(device)
-            targets = targets.to(device)
+        for batch_idx in tqdm(range(num_iterations)):
             optimizer.zero_grad()
-            outputs = model(inputs, use_cache=False)
-            # reshape: (batch, seq_len, vocab) -> (batch*seq_len, vocab)
-            # loss = criterion(outputs.logits.view(-1, model.vocab_size), targets.view(-1))
-            loss = outputs.logits.sum()
+            inp = torch.randint(model.vocab_size, (batch_size, args.seq_len), device=device)
+
+            output = model(inp)
+            loss = output.sum()
             loss.backward()
             optimizer.step()
-
             if global_rank == 0 and batch_idx % args.log_interval == 0:
                 rank_log(global_rank, logger, f"Epoch {epoch} | Batch {batch_idx} | Loss {loss.item():.4f}")
-            # for mod, rec in dtype_records.items():
-            #     print(f"{mod.__class__.__name__}:", 
-            #         "input:",  rec['input_dtype'], 
-            #         # "weight:", rec['weight_dtype'],
-            #         "output:", rec['output_dtype'])
+
         checkpointer.save(model, optimizer)
-    cleanup_distributed_env()
+    rank_log(global_rank, logger, "2D training successfully completed!")
 
 
 def main():

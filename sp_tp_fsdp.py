@@ -1,5 +1,3 @@
-
-
 """
 This is the script to test 2D Parallel which combines Tensor/Sequence
 parallel with Fully Sharded Data Parallel (TP/SP + FSDP) on a example
@@ -32,27 +30,20 @@ https://pytorch.org/tutorials/intermediate/TP_tutorial.html
 """
 
 import sys
-import os
 import argparse
+import os
 from tqdm import tqdm
 import torch
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 
-from utils.log_utils import rank_log, get_logger
-from torch.utils.data import DataLoader, Dataset
 from torch.distributed.fsdp import (
     CPUOffloadPolicy,
     MixedPrecisionPolicy,
     fully_shard,
     FSDPModule,
 )
-from transformers import Qwen3ForCausalLM, Qwen2Tokenizer
-from transformers.models.qwen3.modeling_qwen3 import Qwen3DecoderLayer, Qwen3RMSNorm
-
-from utils.checkpoint import Checkpointer
-
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import fully_shard
 from torch.distributed._tensor import Shard, Replicate
@@ -61,27 +52,17 @@ from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     RowwiseParallel,
     PrepareModuleInput,
+    PrepareModuleOutput, 
     SequenceParallel
 )
 
-# Simple random dataset
-class RandomTokenDataset(Dataset):
-    def __init__(self, seq_len, dataset_size, vocab_size):
-        self.seq_len = seq_len
-        self.dataset_size = dataset_size
-        self.vocab_size = vocab_size
-
-    def __len__(self):
-        return self.dataset_size
-
-    def __getitem__(self, idx):
-        # generate random token sequence and target (shifted by 1)
-        tokens = torch.randint(0, self.vocab_size, (self.seq_len,), dtype=torch.long)
-        return tokens[:-1], tokens[1:]
-    
+from model import Transformer, ModelArgs, RMSNorm, TransformerBlock
+from utils.checkpoint import Checkpointer
+from utils.log_utils import rank_log, get_logger, verify_min_gpu_count
 
 def train(args):
 
+    head_sp = args.head_sp
     tp_size = args.tp_size
     logger = get_logger()
 
@@ -89,11 +70,6 @@ def train(args):
     global_rank = int(os.environ["RANK"])
     world_size = int(os.environ["WORLD_SIZE"])
 
-
-    rank_log(global_rank, logger, f"Starting PyTorch 2D (FSDP + TP) example on rank {global_rank}.")
-    assert (
-        world_size % tp_size == 0
-    ), f"World size {world_size} needs to be divisible by TP size {tp_size}"
 
 
     # create a sharding plan based on the given world_size.
@@ -115,60 +91,109 @@ def train(args):
     # to mimic the behavior of the dataloader.
     dp_rank = dp_mesh.get_local_rank()
 
-    model_name = "/mnt/data/checkpoints/Qwen/Qwen3-14B"
-    model = Qwen3ForCausalLM.from_pretrained(
-        model_name,
-        attn_implementation="sdpa",
-        torch_dtype=torch.bfloat16,
-        device_map="cpu"
-    )
-    model._set_gradient_checkpointing(True)
-    model.gradient_checkpointing_enable({"use_reentrant": False})
+    # test
+    # simple_model_config = ModelArgs(
+    #     dim=4096, n_layers=2, n_heads=32, n_kv_heads=8, vocab_size=151936, head_sp=head_sp, tp_size=tp_size
+    #     )
+    # 7B
+    # simple_model_config = ModelArgs(
+    #     dim=4096, n_layers=36, n_heads=32, n_kv_heads=8, vocab_size=151936, head_sp=head_sp, tp_size=tp_size
+    #     )
+    # 13B
+    simple_model_config = ModelArgs(
+        dim=5120, n_layers=40, n_heads=40, n_kv_heads=8, vocab_size=151936, head_sp=head_sp, tp_size=tp_size
+        )
+    # 32B
+    # simple_model_config = ModelArgs(
+    #     dim=5120, n_layers=64, n_heads=64, n_kv_heads=8, vocab_size=151936, head_sp=head_sp, tp_size=tp_size
+    #     )
+    if head_sp:
+        assert simple_model_config.n_heads % tp_size == 0
+    model = Transformer.from_model_args(simple_model_config)
+    model.gradient_checkpointing = True
     model.train()
-    rank_log(global_rank, logger, f'model.dtype: {model.dtype}')
-    rank_log(global_rank, logger, f"init meta Memory allocated: {torch.cuda.memory_allocated() / 1024**3:.2f} GiB")
-    
+    rank_log(global_rank, logger, f"init model Memory allocated: {torch.cuda.memory_allocated() / 1024**3:.2f} GiB")
+
 
     total_params = sum(p.numel() for p in model.parameters())
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-
     rank_log(global_rank, logger, f"Total parameters: {total_params:,}")
     rank_log(global_rank, logger, f"Trainable parameters: {trainable_params:,}")
 
+    # parallelize the first embedding and the last linear out projection
     model = parallelize_module(
         model,
         tp_mesh,
         {
-            "model.embed_tokens": RowwiseParallel(
+            "tok_embeddings": RowwiseParallel(
                 input_layouts=Replicate(),
                 output_layouts=Shard(1),
             ),
-            "model.norm": SequenceParallel(),
-            "lm_head": ColwiseParallel(
+            "norm": SequenceParallel(),
+            "output": ColwiseParallel(
                 input_layouts=Shard(1),
                 output_layouts=Replicate()
             ),
         }
     )
-
-    for layer_id, transformer_block in enumerate(model.model.layers):
-        layer_tp_plan = {
-            "input_layernorm": SequenceParallel(),
-            "post_attention_layernorm": SequenceParallel(),
-            "mlp.gate_proj": ColwiseParallel(),
-            "mlp.down_proj": RowwiseParallel(),
-            "mlp.up_proj": ColwiseParallel(),
-        }
+    for layer_id, transformer_block in enumerate(model.layers):
+        if head_sp:
+            layer_tp_plan = {
+                "attention_norm": SequenceParallel(),
+                "attention": PrepareModuleInput(
+                    input_layouts=(Shard(1), ),
+                    desired_input_layouts=(Replicate(), ),
+                ),
+                "attention.wq": ColwiseParallel(use_local_output=True),
+                "attention.wk": ColwiseParallel(use_local_output=True),
+                "attention.wv": ColwiseParallel(use_local_output=True),
+                "attention.sp_head": PrepareModuleInput(
+                    input_layouts=(Shard(1), Shard(1), Shard(1)),
+                    desired_input_layouts=(Shard(1), Shard(1), Shard(1)),
+                ),
+                "attention.sp_head": PrepareModuleOutput(
+                    output_layouts=(Shard(1), ),
+                    desired_output_layouts=(Shard(1), ),
+                ),
+                "attention.wo": RowwiseParallel(output_layouts=Shard(1)),
+                "ffn_norm": SequenceParallel(),
+                "feed_forward": PrepareModuleInput(
+                    input_layouts=(Shard(1),),
+                    desired_input_layouts=(Replicate(),),
+                ),
+                "feed_forward.w1": ColwiseParallel(),
+                "feed_forward.w2": RowwiseParallel(output_layouts=Shard(1)),
+                "feed_forward.w3": ColwiseParallel(),
+            }
+        else:
+            layer_tp_plan = {
+                # Now the input and output of SequenceParallel has Shard(1) layouts,
+                # to represent the input/output tensors sharded on the sequence dimension
+                "attention_norm": SequenceParallel(),
+                "attention": PrepareModuleInput(
+                    input_layouts=(Shard(1), ),
+                    desired_input_layouts=(Replicate(), ),
+                ),
+                "attention.wq": ColwiseParallel(use_local_output=False),
+                "attention.wk": ColwiseParallel(use_local_output=False),
+                "attention.wv": ColwiseParallel(use_local_output=False),
+                "attention.wo": RowwiseParallel(output_layouts=Shard(1)),
+                "ffn_norm": SequenceParallel(),
+                "feed_forward": PrepareModuleInput(
+                    input_layouts=(Shard(1),),
+                    desired_input_layouts=(Replicate(),),
+                ),
+                "feed_forward.w1": ColwiseParallel(),
+                "feed_forward.w2": RowwiseParallel(output_layouts=Shard(1)),
+                "feed_forward.w3": ColwiseParallel(),
+            }
 
         # Custom parallelization plan for the model
         parallelize_module(
-            module=transformer_block.mlp,
+            module=transformer_block,
             device_mesh=tp_mesh,
             parallelize_plan=layer_tp_plan
         )
-
-
-    tokenizer = Qwen2Tokenizer.from_pretrained(model_name)
 
     cpu_offload = False
     mp_policy_fp32 = MixedPrecisionPolicy(
@@ -182,7 +207,7 @@ def train(args):
         output_dtype=torch.bfloat16, 
     )
     def shard_module(mod, **fsdp_kwargs):
-        if isinstance(mod, (Qwen3RMSNorm)):
+        if isinstance(mod, (RMSNorm)):
             # print(f'here mod: {mod} should be Qwen3RMSNorm')
             return fully_shard(mod, mp_policy=mp_policy_fp32, **fsdp_kwargs)
         else:
@@ -197,20 +222,20 @@ def train(args):
         fsdp_kwargs["offload_policy"] = CPUOffloadPolicy()
 
     for module in model.modules():
-        if isinstance(module, Qwen3RMSNorm):
+        if isinstance(module, RMSNorm):
             shard_module(module, **fsdp_kwargs)
     for module in model.modules():
-        if isinstance(module, Qwen3DecoderLayer):
+        if isinstance(module, TransformerBlock):
             shard_module(module, **fsdp_kwargs)
     shard_module(model, **fsdp_kwargs)
-    rank_log(global_rank, logger, f"fully_shard Memory allocated: {torch.cuda.memory_allocated() / 1024**3:.2f} GiB")
 
+    # model = fully_shard(model, mesh=dp_mesh)
+    rank_log(global_rank, logger, f"fully_shard Memory allocated: {torch.cuda.memory_allocated() / 1024**3:.2f} GiB")
     rank_log(global_rank, logger, f"Model after parallelization {model=}\n")
 
     # Create an optimizer for the parallelized and sharded model.
     rank_log(global_rank, logger, f"Creating AdamW optimizer with learning rate {args.lr}")
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, foreach=False)
-    criterion = torch.nn.CrossEntropyLoss()
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, foreach=True)
 
     checkpointer = Checkpointer("checkpoints", dcp_api=args.dcp_api)
     if checkpointer.last_training_time is not None:
@@ -218,30 +243,24 @@ def train(args):
         checkpointer.load_optim(model, optimizer)
         rank_log(global_rank, logger, f'resume model...')
 
-    # dataset and loader
-    # dataset = RandomTokenDataset(seq_len=args.seq_len + 1, dataset_size=args.size, vocab_size=model.vocab_size)
-    # sampler = torch.utils.data.distributed.DistributedSampler(dataset) if world_size > 1 else None
-    # loader = DataLoader(dataset, batch_size=args.batch_size, sampler=sampler)
-
     # Training loop:
     # Perform a num of iterations of forward/backward
     # and optimizations for the sharded module.
     rank_log(global_rank, logger, "\nStarting 2D training...")
     num_iterations = args.size
+    batch_size = args.batch_size
 
     for epoch in range(args.epochs):
-        # if sampler:
-        #     sampler.set_epoch(epoch)
         for batch_idx in tqdm(range(num_iterations)):
+            optimizer.zero_grad()
             # seeding with dp_rank to ensure identical inputs for TP groups
             torch.manual_seed(batch_idx + dp_rank)
-            inp = torch.randint(model.vocab_size, (1, args.seq_len), device=device_type)
+            inp = torch.randint(model.vocab_size, (batch_size, args.seq_len), device=device_type)
 
-            output = model(inp, use_cache=False)
-            loss = output[0].sum()
+            output = model(inp)
+            loss = output.sum()
             loss.backward()
             optimizer.step()
-
             if global_rank == 0 and batch_idx % args.log_interval == 0:
                 rank_log(global_rank, logger, f"Epoch {epoch} | Batch {batch_idx} | Loss {loss.item():.4f}")
 
@@ -258,6 +277,7 @@ def main():
     parser.add_argument('--size', type=int, default=1000)
     parser.add_argument('--seq_len', type=int, default=128)
     parser.add_argument('--log_interval', type=int, default=10)
+    parser.add_argument("--head_sp", action="store_true", default=False)
     parser.add_argument("--dcp-api", action="store_true", default=False)
     args = parser.parse_args()
 

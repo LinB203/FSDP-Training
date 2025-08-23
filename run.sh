@@ -17,27 +17,18 @@ RANK=${RANK:-0}
 WORLD_SIZE=${WORLD_SIZE:-1}
 NUM_PROCESSES=$((8 * WORLD_SIZE))
 
-# torchrun \
-#   --nproc_per_node=8 \
-#   --nnodes=${WORLD_SIZE} \
-#   --master_addr=${MASTER_ADDR} \
-#   --master_port=${MASTER_PORT} \
-#   fsdp.py \
-#   --batch_size 1 \
-#   --epochs 3 \
-#   --seq_len 1024 \
-#   --lr 1e-4
 
-# torchrun \
-#   --nproc_per_node=8 \
-#   --nnodes=${WORLD_SIZE} \
-#   --master_addr=${MASTER_ADDR} \
-#   --master_port=${MASTER_PORT} \
-#   fsdp.py \
-#   --batch_size 1 \
-#   --epochs 3 \
-#   --seq_len 1024 \
-#   --lr 1e-4
+torchrun \
+  --nproc_per_node=8 \
+  --nnodes=${WORLD_SIZE} \
+  --master_addr=${MASTER_ADDR} \
+  --master_port=${MASTER_PORT} \
+  fsdp.py \
+  --batch_size 1 \
+  --epochs 3 \
+  --seq_len 8192 \
+  --lr 1e-4
+
 
 
 torchrun \
@@ -45,8 +36,9 @@ torchrun \
   --nnodes=${WORLD_SIZE} \
   --master_addr=${MASTER_ADDR} \
   --master_port=${MASTER_PORT} \
-  tp_fsdp.py \
+  sp_tp_fsdp.py \
   --batch_size 1 \
   --epochs 3 \
-  --seq_len 4096 \
-  --lr 1e-4
+  --seq_len 8192 \
+  --lr 1e-4 \
+  --tp_size 2 --head_sp
