@@ -31,14 +31,41 @@ NUM_PROCESSES=$((8 * WORLD_SIZE))
 
 
 
-torchrun \
-  --nproc_per_node=8 \
-  --nnodes=${WORLD_SIZE} \
-  --master_addr=${MASTER_ADDR} \
-  --master_port=${MASTER_PORT} \
-  train_sp_tp_fsdp.py \
-  --batch_size 1 \
-  --epochs 3 \
-  --seq_len 8192 \
-  --lr 1e-4 \
-  --tp_size 2 --head_sp
+# torchrun \
+#   --nproc_per_node=8 \
+#   --nnodes=${WORLD_SIZE} \
+#   --master_addr=${MASTER_ADDR} \
+#   --master_port=${MASTER_PORT} \
+#   train_sp_tp_fsdp.py \
+#   --batch_size 1 \
+#   --epochs 3 \
+#   --seq_len 8192 \
+#   --lr 1e-4 \
+#   --tp_size 2 --head_sp
+
+
+# torchrun \
+#   --nproc_per_node=8 \
+#   --nnodes=${WORLD_SIZE} \
+#   --master_addr=${MASTER_ADDR} \
+#   --master_port=${MASTER_PORT} \
+#   train_fsdp_real.py \
+#   --batch_size 1 \
+#   --epochs 3 \
+#   --seq_len 8192 \
+#   --lr 1e-4 \
+#   --qwen_model_name /mnt/data/checkpoints/Qwen/Qwen3-0.6B \
+#   --data_path /mnt/data/datasets/Salesforce/wikitext
+
+# torchrun \
+#   --nproc_per_node=8 \
+#   --nnodes=${WORLD_SIZE} \
+#   --master_addr=${MASTER_ADDR} \
+#   --master_port=${MASTER_PORT} \
+#   train_fsdp_real.py \
+#   --batch_size 1 \
+#   --epochs 3 \
+#   --seq_len 8192 \
+#   --lr 1e-4 \
+#   --qwen_model_name /mnt/data/checkpoints/Qwen/Qwen3-0.6B \
+#   --data_path /mnt/data/datasets/Salesforce/wikitext

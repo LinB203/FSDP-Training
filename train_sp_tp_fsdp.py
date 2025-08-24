@@ -52,13 +52,16 @@ from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     RowwiseParallel,
     PrepareModuleInput,
-    PrepareModuleOutput, 
-    SequenceParallel
+    PrepareModuleOutput,
+    SequenceParallel,
 )
 
 from models.model import Transformer, ModelArgs, RMSNorm, TransformerBlock
 from utils.checkpoint import Checkpointer
-from utils.log_utils import rank_log, get_logger, verify_min_gpu_count
+from utils.log_utils import rank_log, get_logger
+from utils.tp_plan import base_tp_plan, head_sp_tp_plan, tp_plan
+from utils.fsdp2_warpper import FSDP2_mix_warpper
+
 
 def train(args):
 
@@ -70,8 +73,6 @@ def train(args):
     global_rank = int(os.environ["RANK"])
     world_size = int(os.environ["WORLD_SIZE"])
 
-
-
     # create a sharding plan based on the given world_size.
     dp_size = world_size // tp_size
 
@@ -79,7 +80,9 @@ def train(args):
     # Create a device mesh with 2 dimensions.
     # First dim is the data parallel dimension
     # Second dim is the tensor parallel dimension.
-    device_mesh = init_device_mesh(device_type, (dp_size, tp_size), mesh_dim_names=("dp", "tp"))
+    device_mesh = init_device_mesh(
+        device_type, (dp_size, tp_size), mesh_dim_names=("dp", "tp")
+    )
 
     rank_log(global_rank, logger, f"Device Mesh created: {device_mesh=}")
     tp_mesh = device_mesh["tp"]
@@ -92,17 +95,23 @@ def train(args):
     dp_rank = dp_mesh.get_local_rank()
 
     # test
-    # simple_model_config = ModelArgs(
-    #     dim=4096, n_layers=2, n_heads=32, n_kv_heads=8, vocab_size=151936, head_sp=head_sp, tp_size=tp_size
-    #     )
+    simple_model_config = ModelArgs(
+        dim=4096,
+        n_layers=2,
+        n_heads=32,
+        n_kv_heads=8,
+        vocab_size=151936,
+        head_sp=head_sp,
+        tp_size=tp_size,
+    )
     # 7B
     # simple_model_config = ModelArgs(
     #     dim=4096, n_layers=36, n_heads=32, n_kv_heads=8, vocab_size=151936, head_sp=head_sp, tp_size=tp_size
     #     )
     # 13B
-    simple_model_config = ModelArgs(
-        dim=5120, n_layers=40, n_heads=40, n_kv_heads=8, vocab_size=151936, head_sp=head_sp, tp_size=tp_size
-        )
+    # simple_model_config = ModelArgs(
+    #     dim=5120, n_layers=40, n_heads=40, n_kv_heads=8, vocab_size=151936, head_sp=head_sp, tp_size=tp_size
+    #     )
     # 32B
     # simple_model_config = ModelArgs(
     #     dim=5120, n_layers=64, n_heads=64, n_kv_heads=8, vocab_size=151936, head_sp=head_sp, tp_size=tp_size
@@ -112,8 +121,11 @@ def train(args):
     model = Transformer.from_model_args(simple_model_config)
     model.gradient_checkpointing = True
     model.train()
-    rank_log(global_rank, logger, f"init model Memory allocated: {torch.cuda.memory_allocated() / 1024**3:.2f} GiB")
-
+    rank_log(
+        global_rank,
+        logger,
+        f"init model Memory allocated: {torch.cuda.memory_allocated() / 1024**3:.2f} GiB",
+    )
 
     total_params = sum(p.numel() for p in model.parameters())
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -121,120 +133,36 @@ def train(args):
     rank_log(global_rank, logger, f"Trainable parameters: {trainable_params:,}")
 
     # parallelize the first embedding and the last linear out projection
-    model = parallelize_module(
-        model,
-        tp_mesh,
-        {
-            "tok_embeddings": RowwiseParallel(
-                input_layouts=Replicate(),
-                output_layouts=Shard(1),
-            ),
-            "norm": SequenceParallel(),
-            "output": ColwiseParallel(
-                input_layouts=Shard(1),
-                output_layouts=Replicate()
-            ),
-        }
-    )
+    # parallelize the first embedding and the last linear out projection
+    model = parallelize_module(model, tp_mesh, base_tp_plan)
     for layer_id, transformer_block in enumerate(model.layers):
-        if head_sp:
-            layer_tp_plan = {
-                "attention_norm": SequenceParallel(),
-                "attention": PrepareModuleInput(
-                    input_layouts=(Shard(1), ),
-                    desired_input_layouts=(Replicate(), ),
-                ),
-                "attention.wq": ColwiseParallel(use_local_output=True),
-                "attention.wk": ColwiseParallel(use_local_output=True),
-                "attention.wv": ColwiseParallel(use_local_output=True),
-                "attention.sp_head": PrepareModuleInput(
-                    input_layouts=(Shard(1), Shard(1), Shard(1)),
-                    desired_input_layouts=(Shard(1), Shard(1), Shard(1)),
-                ),
-                "attention.sp_head": PrepareModuleOutput(
-                    output_layouts=(Shard(1), ),
-                    desired_output_layouts=(Shard(1), ),
-                ),
-                "attention.wo": RowwiseParallel(output_layouts=Shard(1)),
-                "ffn_norm": SequenceParallel(),
-                "feed_forward": PrepareModuleInput(
-                    input_layouts=(Shard(1),),
-                    desired_input_layouts=(Replicate(),),
-                ),
-                "feed_forward.w1": ColwiseParallel(),
-                "feed_forward.w2": RowwiseParallel(output_layouts=Shard(1)),
-                "feed_forward.w3": ColwiseParallel(),
-            }
-        else:
-            layer_tp_plan = {
-                # Now the input and output of SequenceParallel has Shard(1) layouts,
-                # to represent the input/output tensors sharded on the sequence dimension
-                "attention_norm": SequenceParallel(),
-                "attention": PrepareModuleInput(
-                    input_layouts=(Shard(1), ),
-                    desired_input_layouts=(Replicate(), ),
-                ),
-                "attention.wq": ColwiseParallel(use_local_output=False),
-                "attention.wk": ColwiseParallel(use_local_output=False),
-                "attention.wv": ColwiseParallel(use_local_output=False),
-                "attention.wo": RowwiseParallel(output_layouts=Shard(1)),
-                "ffn_norm": SequenceParallel(),
-                "feed_forward": PrepareModuleInput(
-                    input_layouts=(Shard(1),),
-                    desired_input_layouts=(Replicate(),),
-                ),
-                "feed_forward.w1": ColwiseParallel(),
-                "feed_forward.w2": RowwiseParallel(output_layouts=Shard(1)),
-                "feed_forward.w3": ColwiseParallel(),
-            }
-
+        layer_tp_plan = head_sp_tp_plan if head_sp else tp_plan
         # Custom parallelization plan for the model
         parallelize_module(
             module=transformer_block,
             device_mesh=tp_mesh,
-            parallelize_plan=layer_tp_plan
+            parallelize_plan=layer_tp_plan,
         )
 
-    cpu_offload = False
-    mp_policy_fp32 = MixedPrecisionPolicy(
-        param_dtype=torch.float32,    # 参数都以 float32 送进计算
-        reduce_dtype=torch.float32,   # 梯度也用 float32 汇总
-        output_dtype=torch.bfloat16, 
+    FSDP2_mix_warpper(dp_mesh, model, TransformerBlock, norm_to_fp32=RMSNorm)
+    rank_log(
+        global_rank,
+        logger,
+        f"fully_shard Memory allocated: {torch.cuda.memory_allocated() / 1024**3:.2f} GiB",
     )
-    mp_policy_bf16 = MixedPrecisionPolicy(
-        param_dtype=torch.bfloat16,   # 其余层用 bfloat16
-        reduce_dtype=torch.float32,   # 梯度还是 upcast 到 float32
-        output_dtype=torch.bfloat16, 
-    )
-    fsdp_kwargs = {
-        "reshard_after_forward": False,
-        "mesh": dp_mesh,
-    }  # dp_mesh is None means distributed to all nodes.
-
-    if cpu_offload:
-        fsdp_kwargs["offload_policy"] = CPUOffloadPolicy()
-
-    for module in model.modules():
-        if isinstance(module, RMSNorm):
-            fully_shard(module, mp_policy=mp_policy_fp32, **fsdp_kwargs)
-    for module in model.modules():
-        if isinstance(module, TransformerBlock):
-            fully_shard(module, mp_policy=mp_policy_bf16, **fsdp_kwargs)
-    fully_shard(model, mp_policy=mp_policy_bf16, **fsdp_kwargs)
-
-    # model = fully_shard(model, mesh=dp_mesh)
-    rank_log(global_rank, logger, f"fully_shard Memory allocated: {torch.cuda.memory_allocated() / 1024**3:.2f} GiB")
     rank_log(global_rank, logger, f"Model after parallelization {model=}\n")
 
     # Create an optimizer for the parallelized and sharded model.
-    rank_log(global_rank, logger, f"Creating AdamW optimizer with learning rate {args.lr}")
+    rank_log(
+        global_rank, logger, f"Creating AdamW optimizer with learning rate {args.lr}"
+    )
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, foreach=True)
 
     checkpointer = Checkpointer("checkpoints", dcp_api=args.dcp_api)
     if checkpointer.last_training_time is not None:
         checkpointer.load_model(model)
         checkpointer.load_optim(model, optimizer)
-        rank_log(global_rank, logger, f'resume model...')
+        rank_log(global_rank, logger, f"resume model...")
 
     # Training loop:
     # Perform a num of iterations of forward/backward
@@ -248,14 +176,20 @@ def train(args):
             optimizer.zero_grad()
             # seeding with dp_rank to ensure identical inputs for TP groups
             torch.manual_seed(batch_idx + dp_rank)
-            inp = torch.randint(model.vocab_size, (batch_size, args.seq_len), device=device_type)
+            inp = torch.randint(
+                model.vocab_size, (batch_size, args.seq_len), device=device_type
+            )
 
             output = model(inp)
             loss = output.mean()
             loss.backward()
             optimizer.step()
             if global_rank == 0 and batch_idx % args.log_interval == 0:
-                rank_log(global_rank, logger, f"Epoch {epoch} | Batch {batch_idx} | Loss {loss.item():.4f}")
+                rank_log(
+                    global_rank,
+                    logger,
+                    f"Epoch {epoch} | Batch {batch_idx} | Loss {loss.item():.4f}",
+                )
 
         checkpointer.save(model, optimizer)
     rank_log(global_rank, logger, "2D training successfully completed!")
@@ -263,18 +197,19 @@ def train(args):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--tp_size', type=int, default=2)
-    parser.add_argument('--lr', type=float, default=1e-4)
-    parser.add_argument('--batch_size', type=int, default=8)
-    parser.add_argument('--epochs', type=int, default=3)
-    parser.add_argument('--size', type=int, default=1000)
-    parser.add_argument('--seq_len', type=int, default=128)
-    parser.add_argument('--log_interval', type=int, default=10)
+    parser.add_argument("--tp_size", type=int, default=2)
+    parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--batch_size", type=int, default=8)
+    parser.add_argument("--epochs", type=int, default=3)
+    parser.add_argument("--size", type=int, default=1000)
+    parser.add_argument("--seq_len", type=int, default=128)
+    parser.add_argument("--log_interval", type=int, default=10)
     parser.add_argument("--head_sp", action="store_true", default=False)
     parser.add_argument("--dcp-api", action="store_true", default=False)
     args = parser.parse_args()
 
     train(args)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()
