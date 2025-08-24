@@ -56,7 +56,7 @@ from torch.distributed.tensor.parallel import (
     SequenceParallel
 )
 
-from model import Transformer, ModelArgs, RMSNorm, TransformerBlock
+from models.model import Transformer, ModelArgs, RMSNorm, TransformerBlock
 from utils.checkpoint import Checkpointer
 from utils.log_utils import rank_log, get_logger, verify_min_gpu_count
 
@@ -206,13 +206,6 @@ def train(args):
         reduce_dtype=torch.float32,   # 梯度还是 upcast 到 float32
         output_dtype=torch.bfloat16, 
     )
-    def shard_module(mod, **fsdp_kwargs):
-        if isinstance(mod, (RMSNorm)):
-            # print(f'here mod: {mod} should be Qwen3RMSNorm')
-            return fully_shard(mod, mp_policy=mp_policy_fp32, **fsdp_kwargs)
-        else:
-            return fully_shard(mod, mp_policy=mp_policy_bf16, **fsdp_kwargs)
-
     fsdp_kwargs = {
         "reshard_after_forward": False,
         "mesh": dp_mesh,
@@ -223,11 +216,11 @@ def train(args):
 
     for module in model.modules():
         if isinstance(module, RMSNorm):
-            shard_module(module, **fsdp_kwargs)
+            fully_shard(module, mp_policy=mp_policy_fp32, **fsdp_kwargs)
     for module in model.modules():
         if isinstance(module, TransformerBlock):
-            shard_module(module, **fsdp_kwargs)
-    shard_module(model, **fsdp_kwargs)
+            fully_shard(module, mp_policy=mp_policy_bf16, **fsdp_kwargs)
+    fully_shard(model, mp_policy=mp_policy_bf16, **fsdp_kwargs)
 
     # model = fully_shard(model, mesh=dp_mesh)
     rank_log(global_rank, logger, f"fully_shard Memory allocated: {torch.cuda.memory_allocated() / 1024**3:.2f} GiB")
@@ -258,7 +251,7 @@ def train(args):
             inp = torch.randint(model.vocab_size, (batch_size, args.seq_len), device=device_type)
 
             output = model(inp)
-            loss = output.sum()
+            loss = output.mean()
             loss.backward()
             optimizer.step()
             if global_rank == 0 and batch_idx % args.log_interval == 0:

@@ -1,3 +1,4 @@
 checkpoints
 **/__pycache__/**
 wandb/
+valid_tmp_output/

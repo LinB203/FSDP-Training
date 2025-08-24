@@ -25,9 +25,6 @@ class ModelArgs:
 
     max_batch_size: int = 32
     max_seq_len: int = 32768
-    # If `True`, then each transformer block init uses its layer ID, and if
-    # `False`, each uses the total number of transformer blocks
-    depth_init: bool = True
 
 
 def repeat_kv(x: torch.Tensor, n_rep: int) -> torch.Tensor:
@@ -250,11 +247,6 @@ class TransformerBlock(nn.Module):
         self.ffn_norm = RMSNorm(
             dim=model_args.dim, eps=model_args.norm_eps
         )
-
-        if model_args.depth_init:
-            self.weight_init_std = 0.02 / (2 * (self.layer_id + 1)) ** 0.5
-        else:
-            self.weight_init_std = 0.02 / (2 * self.num_layers) ** 0.5
 
     def forward(
         self,

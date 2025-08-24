@@ -18,16 +18,16 @@ WORLD_SIZE=${WORLD_SIZE:-1}
 NUM_PROCESSES=$((8 * WORLD_SIZE))
 
 
-torchrun \
-  --nproc_per_node=8 \
-  --nnodes=${WORLD_SIZE} \
-  --master_addr=${MASTER_ADDR} \
-  --master_port=${MASTER_PORT} \
-  fsdp.py \
-  --batch_size 1 \
-  --epochs 3 \
-  --seq_len 8192 \
-  --lr 1e-4
+# torchrun \
+#   --nproc_per_node=8 \
+#   --nnodes=${WORLD_SIZE} \
+#   --master_addr=${MASTER_ADDR} \
+#   --master_port=${MASTER_PORT} \
+#   train_fsdp.py \
+#   --batch_size 1 \
+#   --epochs 3 \
+#   --seq_len 8192 \
+#   --lr 1e-4
 
 
 
@@ -36,7 +36,7 @@ torchrun \
   --nnodes=${WORLD_SIZE} \
   --master_addr=${MASTER_ADDR} \
   --master_port=${MASTER_PORT} \
-  sp_tp_fsdp.py \
+  train_sp_tp_fsdp.py \
   --batch_size 1 \
   --epochs 3 \
   --seq_len 8192 \
