@@ -5,15 +5,6 @@ from tqdm import tqdm
 import torch
 from torch import nn
 import torch.distributed as dist
-import torch.multiprocessing as mp
-from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.utils.data import DataLoader, Dataset
-from torch.distributed.fsdp import (
-    CPUOffloadPolicy,
-    MixedPrecisionPolicy,
-    fully_shard,
-    FSDPModule,
-)
 
 # Import your model definition here
 from models.model import Transformer, ModelArgs, RMSNorm, TransformerBlock

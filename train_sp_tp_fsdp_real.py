@@ -23,11 +23,6 @@ import torch.distributed as dist
 import torch.nn as nn
 
 from torch.utils.data import DataLoader, Dataset, DistributedSampler
-from torch.distributed.fsdp import (
-    CPUOffloadPolicy,
-    MixedPrecisionPolicy,
-    fully_shard,
-)
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor.parallel import parallelize_module
 

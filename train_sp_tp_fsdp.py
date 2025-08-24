@@ -38,23 +38,10 @@ import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 
-from torch.distributed.fsdp import (
-    CPUOffloadPolicy,
-    MixedPrecisionPolicy,
-    fully_shard,
-    FSDPModule,
-)
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import fully_shard
 from torch.distributed._tensor import Shard, Replicate
-from torch.distributed.tensor.parallel import (
-    parallelize_module,
-    ColwiseParallel,
-    RowwiseParallel,
-    PrepareModuleInput,
-    PrepareModuleOutput,
-    SequenceParallel,
-)
+from torch.distributed.tensor.parallel import parallelize_module
 
 from models.model import Transformer, ModelArgs, RMSNorm, TransformerBlock
 from utils.checkpoint import Checkpointer
