@@ -137,7 +137,7 @@ def train(args):
         dim=4096, n_layers=2, n_heads=32, n_kv_heads=8, vocab_size=tokenizer.vocab_size
     )
     model = Transformer.from_model_args(simple_model_config)
-    model.gradient_checkpointing = True
+    model.gradient_checkpointing = args.gradient_checkpointing
     model.train()
     rank_log(
         global_rank,
@@ -228,6 +228,7 @@ def main():
     parser.add_argument("--epochs", type=int, default=1)
     parser.add_argument("--seq_len", type=int, default=128)
     parser.add_argument("--log_interval", type=int, default=10)
+    parser.add_argument("--gradient_checkpointing", action="store_true", default=False)
     parser.add_argument(
         "--qwen_model_name",
         type=str,

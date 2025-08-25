@@ -85,12 +85,6 @@ Run tp & FSDP on 2 GPUs
 torchrun --nproc_per_node=2 tests/verify_2d_equivalence.py --mode dist --tp_size 2 --batch_size 1 --seq_len 128 --seed 1234
 ```
 
-Run tp & sp & FSDP on 2 GPUs
-
-```
-torchrun --nproc_per_node=2 tests/verify_2d_equivalence.py --mode dist --tp_size 2 --batch_size 1 --seq_len 128 --seed 1234 --head_sp
-```
-
 The results:
 
 ```
@@ -118,6 +112,16 @@ The results:
 [norm.weight] equal=True, max_abs_diff=0.000000e+00, mean_abs_diff=0.000000e+00
 [output.weight] equal=True, max_abs_diff=1.862645e-09, mean_abs_diff=3.105705e-13
 ```
+
+## Benchmark (14B model)
+
+| FSDP Config | TP×DP | Gradient Checkpointing | 2048 (tokens) | 4096 (tokens) | 8192 (tokens) | 16384 (tokens) |
+|-------------|-------|-------------------------|---------------|---------------|---------------|----------------|
+| ✅          | 1×8   | ✗                       | 1.1s/it • 79G | OOM           | OOM           | OOM            |
+| ✅          | 1×8   | ✓                       | 1.3s/it • 73G | 2.4s/it • 77G | OOM           | OOM            |
+| ✅          | 2×4   | ✗                       | 0.8s/it • 57G | 1.1s/it • 71G | OOM           | OOM            |
+| ✅          | 2×4   | ✓                       | 1.0s/it • 55G | 1.4s/it • 57G | 2.7s/it • 65G | 5.8s/it • 70G |
+
 
 ## References
 

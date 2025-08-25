@@ -82,31 +82,49 @@ def train(args):
     dp_rank = dp_mesh.get_local_rank()
 
     # test
+    # simple_model_config = ModelArgs(
+    #     dim=4096,
+    #     n_layers=2,
+    #     n_heads=32,
+    #     n_kv_heads=8,
+    #     vocab_size=151936,
+    #     head_sp=head_sp,
+    #     tp_size=tp_size,
+    # )
+    # 7B
+    # simple_model_config = ModelArgs(
+    #     dim=4096,
+    #     n_layers=36,
+    #     n_heads=32,
+    #     n_kv_heads=8,
+    #     vocab_size=151936,
+    #     head_sp=head_sp,
+    #     tp_size=tp_size,
+    # )
+    # 13B
     simple_model_config = ModelArgs(
-        dim=4096,
-        n_layers=2,
-        n_heads=32,
+        dim=5120,
+        n_layers=40,
+        n_heads=40,
         n_kv_heads=8,
         vocab_size=151936,
         head_sp=head_sp,
         tp_size=tp_size,
     )
-    # 7B
-    # simple_model_config = ModelArgs(
-    #     dim=4096, n_layers=36, n_heads=32, n_kv_heads=8, vocab_size=151936, head_sp=head_sp, tp_size=tp_size
-    #     )
-    # 13B
-    # simple_model_config = ModelArgs(
-    #     dim=5120, n_layers=40, n_heads=40, n_kv_heads=8, vocab_size=151936, head_sp=head_sp, tp_size=tp_size
-    #     )
     # 32B
     # simple_model_config = ModelArgs(
-    #     dim=5120, n_layers=64, n_heads=64, n_kv_heads=8, vocab_size=151936, head_sp=head_sp, tp_size=tp_size
-    #     )
+    #     dim=8192,
+    #     n_layers=64,
+    #     n_heads=64,
+    #     n_kv_heads=8,
+    #     vocab_size=151936,
+    #     head_sp=head_sp,
+    #     tp_size=tp_size,
+    # )
     if head_sp:
         assert simple_model_config.n_heads % tp_size == 0
     model = Transformer.from_model_args(simple_model_config)
-    model.gradient_checkpointing = True
+    model.gradient_checkpointing = args.gradient_checkpointing
     model.train()
     rank_log(
         global_rank,
@@ -119,7 +137,6 @@ def train(args):
     rank_log(global_rank, logger, f"Total parameters: {total_params:,}")
     rank_log(global_rank, logger, f"Trainable parameters: {trainable_params:,}")
 
-    # parallelize the first embedding and the last linear out projection
     # parallelize the first embedding and the last linear out projection
     model = parallelize_module(model, tp_mesh, base_tp_plan)
     for layer_id, transformer_block in enumerate(model.layers):
@@ -191,6 +208,7 @@ def main():
     parser.add_argument("--size", type=int, default=1000)
     parser.add_argument("--seq_len", type=int, default=128)
     parser.add_argument("--log_interval", type=int, default=10)
+    parser.add_argument("--gradient_checkpointing", action="store_true", default=False)
     parser.add_argument("--head_sp", action="store_true", default=False)
     parser.add_argument("--dcp-api", action="store_true", default=False)
     args = parser.parse_args()

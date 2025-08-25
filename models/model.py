@@ -1,4 +1,3 @@
-
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # This software may be used and distributed according to the terms of the Llama 2 Community License Agreement.
 
@@ -9,6 +8,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 import torch.utils.checkpoint as cp
+
 
 @dataclass
 class ModelArgs:
@@ -70,16 +70,22 @@ class RMSNorm(nn.Module):
     def reset_parameters(self):
         torch.nn.init.ones_(self.weight)  # type: ignore
 
+
 class sp_head(nn.Module):
-    def __init__(self, ):
+    def __init__(
+        self,
+    ):
         super().__init__()
 
     def forward(self, xq, xk, xv):
         # # (bs, n_local_heads, seqlen, head_dim)
-        
-        # print(f'in sp_head: xq.shape {xq.shape}, xk.shape {xk.shape}, xv.shape {xv.shape}, ')
+
+        # print(
+        #     f"in sp_head: xq.shape {xq.shape}, xk.shape {xk.shape}, xv.shape {xv.shape}, "
+        # )
         output = F.scaled_dot_product_attention(xq, xk, xv, is_causal=True)
         return output
+
 
 class Attention(nn.Module):
     """
@@ -124,7 +130,6 @@ class Attention(nn.Module):
         )
         self.sp_head = sp_head()
 
-
     def forward(
         self,
         x: torch.Tensor,
@@ -143,9 +148,27 @@ class Attention(nn.Module):
         # print(f'in attn: hidden_states.shape {x.shape}')
         xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
 
-        xq = xq.view(bsz, seqlen, self.n_heads // (self.tp_size if self.head_sp else 1), self.head_dim)
-        xk = xk.view(bsz, seqlen, self.n_kv_heads // (self.tp_size if self.head_sp else 1), self.head_dim)
-        xv = xv.view(bsz, seqlen, self.n_kv_heads // (self.tp_size if self.head_sp else 1), self.head_dim)
+        xq = xq.view(
+            bsz,
+            seqlen,
+            # self.n_heads // (self.tp_size if self.head_sp else 1),
+            self.n_heads,
+            self.head_dim,
+        )
+        xk = xk.view(
+            bsz,
+            seqlen,
+            # self.n_kv_heads // (self.tp_size if self.head_sp else 1),
+            self.n_kv_heads,
+            self.head_dim,
+        )
+        xv = xv.view(
+            bsz,
+            seqlen,
+            # self.n_kv_heads // (self.tp_size if self.head_sp else 1),
+            self.n_kv_heads,
+            self.head_dim,
+        )
         # print(f'in attn: query_states.shape {xq.shape}')
 
         keys = repeat_kv(xk, self.n_rep)  # (bs, seqlen, n_local_heads, head_dim)
@@ -154,17 +177,23 @@ class Attention(nn.Module):
         xq = xq.transpose(1, 2)  # (bs, n_local_heads, seqlen, head_dim)
         xk = keys.transpose(1, 2)  # (bs, n_local_heads, seqlen, head_dim)
         xv = values.transpose(1, 2)  # (bs, n_local_heads, seqlen, head_dim)
-        # print(f'in attn: xq.shape {xq.shape}, xk.shape {xk.shape}, xv.shape {xv.shape}, ')
-        
+        # print(
+        #     f"in attn: xq.shape {xq.shape}, xk.shape {xk.shape}, xv.shape {xv.shape}, "
+        # )
+
         # we use casual mask for training
         output = self.sp_head(xq, xk, xv)
         # output = F.scaled_dot_product_attention(xq, xk, xv, is_causal=True)
-        # print(f'in attn: after sdpa {output.shape}')
+        # print(f"in attn: after sdpa {output.shape}")
         output = output.transpose(
             1, 2
         ).contiguous()  # (bs, seqlen, n_local_heads, head_dim)
+        # print(f"in attn: before output.view(bsz, seqlen, -1) {output.shape}")
         output = output.view(bsz, seqlen, -1)
-        return self.wo(output)
+        # print(f"in attn: after output.view(bsz, seqlen, -1) {output.shape}")
+        output = self.wo(output)
+        # print(f"in attn: after output {output.shape}")
+        return output
 
 
 class FeedForward(nn.Module):
@@ -206,7 +235,6 @@ class FeedForward(nn.Module):
         return self.w2(F.silu(self.w1(x)) * self.w3(x))
 
 
-
 class TransformerBlock(nn.Module):
     """
     TransformerBlock Module
@@ -241,12 +269,8 @@ class TransformerBlock(nn.Module):
         self.layer_id = layer_id
         self.num_layers = model_args.n_layers
 
-        self.attention_norm = RMSNorm(
-            dim=model_args.dim, eps=model_args.norm_eps
-        )
-        self.ffn_norm = RMSNorm(
-            dim=model_args.dim, eps=model_args.norm_eps
-        )
+        self.attention_norm = RMSNorm(dim=model_args.dim, eps=model_args.norm_eps)
+        self.ffn_norm = RMSNorm(dim=model_args.dim, eps=model_args.norm_eps)
 
     def forward(
         self,
@@ -269,7 +293,7 @@ class TransformerBlock(nn.Module):
         hidden_states = self.attention(hidden_states)
         # print(f'after self_attn {hidden_states.shape}')
         hidden_states = residual + hidden_states
-        
+
         # Fully Connected
         residual = hidden_states
         # print(f'before post_attention_layernorm {hidden_states.shape}')
@@ -280,7 +304,6 @@ class TransformerBlock(nn.Module):
         # print(f'final residual: {residual.shape}, hidden_states: {hidden_states.shape}')
         hidden_states = residual + hidden_states
         return hidden_states
-    
 
 
 class Transformer(nn.Module):
@@ -316,9 +339,7 @@ class Transformer(nn.Module):
         for layer_id in range(model_args.n_layers):
             self.layers.append(TransformerBlock(layer_id, model_args))
 
-        self.norm = RMSNorm(
-            dim=model_args.dim, eps=model_args.norm_eps
-        )
+        self.norm = RMSNorm(dim=model_args.dim, eps=model_args.norm_eps)
 
         self.output = nn.Linear(model_args.dim, model_args.vocab_size, bias=False)
 

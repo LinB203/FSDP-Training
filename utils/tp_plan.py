@@ -5,6 +5,7 @@ from torch.distributed.tensor.parallel import (
     PrepareModuleInput,
     PrepareModuleOutput,
     SequenceParallel,
+    PrepareModuleInputOutput,
 )
 
 from torch.distributed._tensor import Shard, Replicate
@@ -18,6 +19,25 @@ base_tp_plan = {
     "output": ColwiseParallel(input_layouts=Shard(1), output_layouts=Replicate()),
 }
 
+# head_sp_plan = {
+#     "attention.sp_head": PrepareModuleInputOutput(
+#         input_layouts=(
+#             Replicate(),
+#             Replicate(),
+#             Replicate(),
+#         ),
+#         desired_input_layouts=(
+#             Shard(1),
+#             Shard(1),
+#             Shard(1),
+#         ),
+#         output_layouts=(Shard(1),),
+#         desired_output_layouts=(Replicate(),),
+#     ),
+#     "attention.wo": RowwiseParallel(
+#         input_layouts=Replicate(), output_layouts=Replicate()
+#     ),
+# }
 
 head_sp_tp_plan = {
     "attention_norm": SequenceParallel(),
@@ -28,15 +48,11 @@ head_sp_tp_plan = {
     "attention.wq": ColwiseParallel(use_local_output=True),
     "attention.wk": ColwiseParallel(use_local_output=True),
     "attention.wv": ColwiseParallel(use_local_output=True),
-    "attention.sp_head": PrepareModuleInput(
-        input_layouts=(Shard(1), Shard(1), Shard(1)),
-        desired_input_layouts=(Shard(1), Shard(1), Shard(1)),
-    ),
     "attention.sp_head": PrepareModuleOutput(
         output_layouts=(Shard(1),),
-        desired_output_layouts=(Shard(1),),
+        desired_output_layouts=(Replicate(),),
     ),
-    "attention.wo": RowwiseParallel(output_layouts=Shard(1)),
+    "attention.wo": RowwiseParallel(input_layouts=Replicate(), output_layouts=Shard(1)),
     "ffn_norm": SequenceParallel(),
     "feed_forward": PrepareModuleInput(
         input_layouts=(Shard(1),),
