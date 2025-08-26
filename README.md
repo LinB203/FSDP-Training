@@ -1,7 +1,7 @@
 A minimal parallel training example.
 
 ## Env
-torch ≥ 2.7.1
+torch ≥ 2.8.0
 ```
 pip install -r requirements.txt
 ```
@@ -39,7 +39,7 @@ torchrun \
 
 ## FSDP+TP+SP
 
-TP for MLP, SP for attn_head
+TP for MLP (`--tp_size 2`), SP for attn_head (` --head_sp`)
 
 ```
 torchrun \
@@ -52,7 +52,7 @@ torchrun \
   --epochs 3 \
   --seq_len 8192 \
   --lr 1e-4 \
-  --tp_size 2 --head_sp
+  --tp_size 2
 
 
 # real dataset
@@ -90,6 +90,7 @@ The results:
 ```
 [dist rank0] Comparison result: equal=True, max_abs_diff=4.112720e-06, mean_abs_diff=3.527717e-07
 
+# Compare gradient by one step updated checkpoint
 [tok_embeddings.weight] equal=True, max_abs_diff=5.960464e-08, mean_abs_diff=1.981021e-16
 [layers.0.attention.wq.weight] equal=True, max_abs_diff=9.313226e-10, mean_abs_diff=1.264637e-13
 [layers.0.attention.wk.weight] equal=True, max_abs_diff=9.313226e-10, mean_abs_diff=2.701494e-13
@@ -113,7 +114,9 @@ The results:
 [output.weight] equal=True, max_abs_diff=1.862645e-09, mean_abs_diff=3.105705e-13
 ```
 
-## Benchmark (14B model)
+## Benchmark
+
+14B model
 
 | FSDP Config | TP×DP | Gradient Checkpointing | 2048 (tokens) | 4096 (tokens) | 8192 (tokens) | 16384 (tokens) |
 |-------------|-------|-------------------------|---------------|---------------|---------------|----------------|
