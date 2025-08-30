@@ -5,6 +5,7 @@ logging.basicConfig(
     format="%(asctime)s %(message)s", datefmt="%m/%d/%Y %I:%M:%S %p", level=logging.INFO
 )
 
+
 def get_logger():
     return logging.getLogger(__name__)
 
@@ -16,7 +17,11 @@ def rank_log(_rank, logger, msg):
 
 
 def verify_min_gpu_count(min_gpus: int = 2) -> bool:
-    """ verification that we have at least 2 gpus to run dist examples """
+    """verification that we have at least 2 gpus to run dist examples"""
     has_gpu = torch.accelerator.is_available()
     gpu_count = torch.accelerator.device_count()
     return has_gpu and gpu_count >= min_gpus
+
+
+def get_memory_allocated():
+    return f"{torch.cuda.memory_allocated() / 1024**3:.2f}"  # GiB

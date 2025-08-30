@@ -1,0 +1,24 @@
+training_config:
+  seed: 42
+  mixed_bf16_precision: true
+  gradient_checkpointing: true
+  dcp_api: false
+  learning_rate: 1e-5
+  grad_accum_steps: 1
+  log_interval: 1
+  max_grad_norm: 1.0
+  save_interval: 10
+  wandb_proj_name: "qwen-image-edit-train"
+  wandb_run_name: "test"
+  weight_init: null
+  resume_from_checkpoint: "latest"
+
+model_config:
+  condition_encoder_name_or_path: "/mnt/data/checkpoints/Qwen/Qwen-Image-Edit/text_encoder"
+  condition_processor_name_or_path: "/mnt/data/checkpoints/Qwen/Qwen-Image-Edit/processor"
+  vae_name_or_path: "/mnt/data/checkpoints/Qwen/Qwen-Image-Edit/vae"
+  scheduler_name_or_path: "/mnt/data/checkpoints/Qwen/Qwen-Image-Edit/scheduler"
+
+dataset_config:
+  batch_size: 1
+  num_workers: 8

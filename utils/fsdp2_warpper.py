@@ -6,7 +6,7 @@ from torch.distributed.fsdp import (
 )
 
 
-def FSDP2_warpper(dp_mesh, model, main_block, fp32=False):
+def FSDP2_warpper(dp_mesh, model, main_block=None, fp32=False):
     cpu_offload = False
     mp_policy_fp32 = MixedPrecisionPolicy(
         param_dtype=torch.float32,  # 参数都以 float32 送进计算
@@ -27,7 +27,7 @@ def FSDP2_warpper(dp_mesh, model, main_block, fp32=False):
         fsdp_kwargs["offload_policy"] = CPUOffloadPolicy()
 
     for module in model.modules():
-        if isinstance(module, main_block):
+        if main_block is not None and isinstance(module, main_block):
             fully_shard(
                 module,
                 mp_policy=mp_policy_fp32 if fp32 else mp_policy_bf16,
@@ -38,7 +38,7 @@ def FSDP2_warpper(dp_mesh, model, main_block, fp32=False):
     )
 
 
-def FSDP2_mix_warpper(dp_mesh, model, main_block_to_bf16, norm_to_fp32=None):
+def FSDP2_mix_warpper(dp_mesh, model, main_block_to_bf16=None, norm_to_fp32=None):
     cpu_offload = False
     mp_policy_fp32 = MixedPrecisionPolicy(
         param_dtype=torch.float32,  # 参数都以 float32 送进计算
@@ -63,6 +63,6 @@ def FSDP2_mix_warpper(dp_mesh, model, main_block_to_bf16, norm_to_fp32=None):
             if isinstance(module, norm_to_fp32):
                 fully_shard(module, mp_policy=mp_policy_fp32, **fsdp_kwargs)
     for module in model.modules():
-        if isinstance(module, main_block_to_bf16):
+        if main_block_to_bf16 is not None and isinstance(module, main_block_to_bf16):
             fully_shard(module, mp_policy=mp_policy_bf16, **fsdp_kwargs)
     fully_shard(model, mp_policy=mp_policy_bf16, **fsdp_kwargs)

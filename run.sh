@@ -1,3 +1,6 @@
+#!/bin/bash
+export WANDB_MODE="offline"
+export WANDB_API_KEY="953e958793b218efb850fa194e85843e2c3bd88b"
 
 export TOKENIZERS_PARALLELISM=true
 
@@ -15,7 +18,6 @@ MASTER_ADDR=${MASTER_ADDR:-127.0.0.1}
 MASTER_PORT=${MASTER_PORT:-29500}
 RANK=${RANK:-0}
 WORLD_SIZE=${WORLD_SIZE:-1}
-NUM_PROCESSES=$((8 * WORLD_SIZE))
 
 
 torchrun \
@@ -24,48 +26,4 @@ torchrun \
   --master_addr=${MASTER_ADDR} \
   --master_port=${MASTER_PORT} \
   train_fsdp.py \
-  --batch_size 1 \
-  --epochs 3 \
-  --seq_len 8192 \
-  --lr 1e-4  --gradient_checkpointing
-
-
-
-# torchrun \
-#   --nproc_per_node=8 \
-#   --nnodes=${WORLD_SIZE} \
-#   --master_addr=${MASTER_ADDR} \
-#   --master_port=${MASTER_PORT} \
-#   train_sp_tp_fsdp.py \
-#   --batch_size 1 \
-#   --epochs 3 \
-#   --seq_len 8192 \
-#   --lr 1e-4 \
-#   --tp_size 2 
-
-
-# torchrun \
-#   --nproc_per_node=8 \
-#   --nnodes=${WORLD_SIZE} \/
-#   --master_addr=${MASTER_ADDR} \
-#   --master_port=${MASTER_PORT} \
-#   train_fsdp_real.py \
-#   --batch_size 1 \
-#   --epochs 3 \
-#   --seq_len 16384 \
-#   --lr 1e-4 \
-#   --qwen_model_name /mnt/data/checkpoints/Qwen/Qwen3-0.6B \
-#   --data_path /mnt/data/datasets/Salesforc/e/wikitext
-
-# torchrun \
-#   --nproc_per_node=8 \
-#   --nnodes=${WORLD_SIZE} \
-#   --master_addr=${MASTER_ADDR} \
-#   --master_port=${MASTER_PORT} \
-#   train_fsdp_real.py \
-#   --batch_size 1 \
-#   --epochs 3 \
-#   --seq_len 8192 \
-#   --lr 1e-4 \
-#   --qwen_model_name /mnt/data/checkpoints/Qwen/Qwen3-0.6B \
-#   --data_path /mnt/data/datasets/Salesforce/wikitext
+  configs/test.yaml
