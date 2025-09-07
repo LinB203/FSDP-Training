@@ -13,6 +13,8 @@
 from dataclasses import dataclass
 import functools
 import math
+from einops import rearrange
+from contextlib import contextmanager
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
@@ -20,6 +22,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from diffusers.models.attention_dispatch import dispatch_attention_fn
+from diffusers.models.cache_utils import CacheMixin
 from diffusers.models.attention import FeedForward
 from diffusers.models.attention_processor import Attention
 from diffusers.models.embeddings import TimestepEmbedding, Timesteps
@@ -32,6 +36,7 @@ class ModelArgs:
     head_sp: bool = False
     tp_size: int = 1
 
+    guidance_embeds: bool = False
     patch_size: int = 2
     in_channels: int = 64
     out_channels: Optional[int] = 16
@@ -370,6 +375,9 @@ class DoubleStreamAttnProcessor2_0:
         joint_key = torch.cat([txt_key, img_key], dim=1)
         joint_value = torch.cat([txt_value, img_value], dim=1)
 
+        joint_query = rearrange(joint_query, "b l n d -> b n l d")
+        joint_key = rearrange(joint_key, "b l n d -> b n l d")
+        joint_value = rearrange(joint_value, "b l n d -> b n l d")
         # Compute joint attention
         joint_hidden_states = F.scaled_dot_product_attention(
             joint_query,
@@ -381,7 +389,7 @@ class DoubleStreamAttnProcessor2_0:
         )
 
         # Reshape back
-        joint_hidden_states = joint_hidden_states.flatten(2, 3)
+        joint_hidden_states = rearrange(joint_hidden_states, "b n l d -> b l (n d)")
         joint_hidden_states = joint_hidden_states.to(joint_query.dtype)
 
         # Split attention outputs back
@@ -520,7 +528,7 @@ class TransformerBlock(nn.Module):
         return encoder_hidden_states, hidden_states
 
 
-class Transformer2DModel(nn.Module):
+class Transformer2DModel(nn.Module, CacheMixin):
     """
     The Transformer model introduced.
 
@@ -548,7 +556,7 @@ class Transformer2DModel(nn.Module):
 
     def __init__(self, model_args: ModelArgs):
         super().__init__()
-        self.model_args = model_args
+        self.config = model_args
         self.out_channels = model_args.out_channels or model_args.in_channels
         self.inner_dim = model_args.num_attention_heads * model_args.attention_head_dim
 
@@ -593,6 +601,7 @@ class Transformer2DModel(nn.Module):
         timestep: torch.LongTensor = None,
         img_shapes: Optional[List[Tuple[int, int, int]]] = None,
         txt_seq_lens: Optional[List[int]] = None,
+        guidance: torch.Tensor = None,  # TODO: this should probably be removed
         attention_kwargs: Optional[Dict[str, Any]] = None,
         return_dict: bool = True,
     ) -> Union[torch.Tensor, Transformer2DModelOutput]:

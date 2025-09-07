@@ -12,6 +12,7 @@ class TrainingConfig:
     learning_rate: float = 1e-5
     max_grad_norm: Optional[float] = 1.0
     log_interval: int = 1
+    validation_steps: int = 500
     save_interval: int = 1000
     wandb_proj_name: Optional[str] = None
     wandb_run_name: Optional[str] = None
@@ -19,12 +20,18 @@ class TrainingConfig:
     weight_init: Optional[str] = None
     resume_from_checkpoint: Optional[str] = "latest"
     checkpoints_total_limit: Optional[int] = None
+    num_to_explicit_prefetching: Optional[int] = None
 
 
 @dataclass
 class DatasetConfig:
+    data_txt: Optional[str] = None
+    val_data_txt: Optional[str] = None
     batch_size: int = 16
     num_workers: int = 4
+
+    reversed_text_edit_ratio: float = 0.0
+    box_guidance_text_edit_ratio: float = 0.0
 
 
 @dataclass

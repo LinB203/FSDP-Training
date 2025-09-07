@@ -1,0 +1,15 @@
+/mnt/data/datasets/X-ART/LeX-10K/json_data/images,/mnt/data/datasets/imgedit_kontext,/mnt/data/datasets/imgedit_kontext/lb_scripts/edit_text_en_lex_4451.json
+/mnt/data/datasets/TextAtlas5M,/mnt/data/datasets/imgedit_kontext,/mnt/data/datasets/imgedit_kontext/lb_scripts/edit_text_en_10925.json
+/mnt/data/datasets/laion-high-resolution-chinese,/mnt/data/datasets/laion-high-resolution-chinese,/mnt/data/datasets/laion-high-resolution-chinese/edit_text_cn_26904.json
+/mnt/data/datasets/X-ART/LeX-10K/json_data/images,/mnt/data/datasets/imgedit_kontext,/mnt/data/datasets/imgedit_kontext/lb_scripts/edit_text_en_lex_4451.json
+/mnt/data/datasets/TextAtlas5M,/mnt/data/datasets/imgedit_kontext,/mnt/data/datasets/imgedit_kontext/lb_scripts/edit_text_en_10925.json
+/mnt/data/datasets/laion-high-resolution-chinese,/mnt/data/datasets/laion-high-resolution-chinese,/mnt/data/datasets/laion-high-resolution-chinese/edit_text_cn_26904.json
+/mnt/data/datasets/X-ART/LeX-10K/json_data/images,/mnt/data/datasets/imgedit_kontext,/mnt/data/datasets/imgedit_kontext/lb_scripts/edit_text_en_lex_4451.json
+/mnt/data/datasets/TextAtlas5M,/mnt/data/datasets/imgedit_kontext,/mnt/data/datasets/imgedit_kontext/lb_scripts/edit_text_en_10925.json
+/mnt/data/datasets/laion-high-resolution-chinese,/mnt/data/datasets/laion-high-resolution-chinese,/mnt/data/datasets/laion-high-resolution-chinese/edit_text_cn_26904.json
+/mnt/data/datasets/X-ART/LeX-10K/json_data/images,/mnt/data/datasets/imgedit_kontext,/mnt/data/datasets/imgedit_kontext/lb_scripts/edit_text_en_lex_4451.json
+/mnt/data/datasets/TextAtlas5M,/mnt/data/datasets/imgedit_kontext,/mnt/data/datasets/imgedit_kontext/lb_scripts/edit_text_en_10925.json
+/mnt/data/datasets/laion-high-resolution-chinese,/mnt/data/datasets/laion-high-resolution-chinese,/mnt/data/datasets/laion-high-resolution-chinese/edit_text_cn_26904.json
+/mnt/data/datasets/X-ART/LeX-10K/json_data/images,/mnt/data/datasets/imgedit_kontext,/mnt/data/datasets/imgedit_kontext/lb_scripts/edit_text_en_lex_4451.json
+/mnt/data/datasets/TextAtlas5M,/mnt/data/datasets/imgedit_kontext,/mnt/data/datasets/imgedit_kontext/lb_scripts/edit_text_en_10925.json
+/mnt/data/datasets/laion-high-resolution-chinese,/mnt/data/datasets/laion-high-resolution-chinese,/mnt/data/datasets/laion-high-resolution-chinese/edit_text_cn_26904.json

@@ -24,10 +24,15 @@ from transformers import (
     AutoConfig,
     Qwen2VLProcessor,
 )
+from transformers.models.qwen2_5_vl.modeling_qwen2_5_vl import Qwen2_5_VLDecoderLayer
 from accelerate import init_empty_weights
 from diffusers.image_processor import VaeImageProcessor
-from diffusers.models import AutoencoderKLQwenImage
+from diffusers.models import AutoencoderKLQwenImage, QwenImageTransformer2DModel
+from diffusers.models.transformers.transformer_qwenimage import (
+    QwenImageTransformerBlock,
+)
 from diffusers.schedulers import FlowMatchEulerDiscreteScheduler
+from diffusers import QwenImageEditPipeline
 
 # Import your model definition here
 from models.transformer import (
@@ -35,60 +40,20 @@ from models.transformer import (
     ModelArgs,
     TransformerBlock,
 )
+from data.custom_dataset import CustomDataset
 from utils.configuration import Config
 from utils.checkpoint import Checkpointer
 from utils.merge_safetensors import load_safetensors
-from utils.fsdp2_warpper import FSDP2_mix_warpper, FSDP2_warpper
 from utils.log_utils import rank_log, get_logger, get_memory_allocated
 from utils.dataset_utils import PREFERRED_KONTEXT_RESOLUTIONS, calculate_dimensions
 from utils.dist_utils import setup_distributed_env, cleanup_distributed_env, set_seed
 from utils.encode_utils import get_qwen_prompt_embeds, vae_encode_and_pack, add_noise
-
-
-class RandomDataset(Dataset):
-    """Holds fixed-length token blocks as torch tensors."""
-
-    def __init__(
-        self,
-        image_processor: VaeImageProcessor,
-    ):
-        self.image_processor = image_processor
-        self.prompt_template_encode = "<|im_start|>system\nDescribe the key features of the input image (color, shape, size, texture, objects, background), then explain how the user's text instruction should alter or modify the image. Generate a new image that meets the user's requirements while maintaining consistency with the original input where appropriate.<|im_end|>\n<|im_start|>user\n<|vision_start|><|image_pad|><|vision_end|>{}<|im_end|>\n<|im_start|>assistant\n"
-
-    def __len__(self):
-        return 1000000
-
-    def get_random_pil_image(self):
-        h = random.randint(512, 2048)
-        w = random.randint(512, 2048)
-        img_tensor = torch.randint(0, 256, (h, w, 3), dtype=torch.uint8)
-        img = Image.fromarray(img_tensor.numpy())
-        return img
-
-    def get_random_prompt(self):
-        length = random.randint(10, 64)
-        return " ".join(random.choice(string.ascii_lowercase) for _ in range(length))
-
-    def __getitem__(self, idx):
-        img_ref = self.get_random_pil_image()
-        img_gt = deepcopy(img_ref)
-        w, h = img_ref.size
-        aspect_ratio = w / h
-        # _, w, h = min(
-        #     (abs(aspect_ratio - w / h), w, h) for w, h in PREFERRED_KONTEXT_RESOLUTIONS
-        # )
-        w, h = 128, 128
-        img_ref = self.image_processor.resize(img_ref, w, h)
-        prompt_image = img_ref  # PIL.Image
-
-        # 3 1 h w, [-1, 1]
-        img_ref = self.image_processor.preprocess(img_ref, w, h).transpose(0, 1)
-        img_gt = self.image_processor.preprocess(img_gt, w, h).transpose(0, 1)
-
-        prompt = self.get_random_prompt()
-        template = self.prompt_template_encode
-        txt = template.format(prompt)
-        return dict(txt=txt, prompt_image=prompt_image, img_gt=img_gt, img_ref=img_ref)
+from utils.fsdp2_warpper import (
+    FSDP2_mix_warpper,
+    FSDP2_warpper,
+    set_modules_to_forward_prefetch,
+    set_modules_to_backward_prefetch,
+)
 
 
 class DataCollator:
@@ -119,7 +84,7 @@ class DataCollator:
 
 def prepare_dataloader(args, image_processor, processor, rank, world_size):
     # create dataset
-    dataset = RandomDataset(image_processor)
+    dataset = CustomDataset(args, image_processor)
     collator = DataCollator(processor)
 
     # Create DistributedSampler when world_size > 1
@@ -131,7 +96,7 @@ def prepare_dataloader(args, image_processor, processor, rank, world_size):
     dataloader = DataLoader(
         dataset,
         batch_size=args.dataset_config.batch_size,
-        sampler=None,
+        sampler=sampler,
         shuffle=True if sampler is None else False,
         num_workers=args.dataset_config.num_workers,
         pin_memory=True,
@@ -139,6 +104,47 @@ def prepare_dataloader(args, image_processor, processor, rank, world_size):
     )
 
     return dataloader, sampler
+
+
+# def get_trainable_params(
+#     layers_to_train: int = list(range(57)),
+#     num_transformer_blocks: int = 19,
+#     only_img_branch: bool = True,
+# ):
+#     components = [
+#         # "x_embedder"
+#     ]
+#     transformer_components = [
+#         "attn.norm_q",
+#         "attn.norm_k",
+#         "attn.to_q",
+#         "attn.to_k",
+#         "attn.to_v",
+#         "attn.to_out",
+#         "norm1.linear",
+#     ]
+#     if not only_img_branch:
+#         components.extend(
+#             [
+#                 # "context_embedder"
+#             ]
+#         )
+#         transformer_components.extend(
+#             [
+#                 "norm1_context.linear",
+#                 "attn.norm_added_q",
+#                 "attn.norm_added_k",
+#                 "ff.net",
+#                 "ff_context.net",
+#             ]
+#         )
+#         single_transformer_components.extend(["proj_mlp", "proj_out"])
+#     for layer in layers_to_train:
+#         prefix = f"denoise_tower.denoiser.transformer_blocks.{layer}"
+#         base_components = transformer_components
+#         components.extend([f"{prefix}.{comp}" for comp in base_components])
+
+#     return components
 
 
 def train(args):
@@ -178,7 +184,20 @@ def train(args):
         torch_dtype=weight_dtype,
         attn_implementation="sdpa",
     ).eval()
-    FSDP2_warpper(None, condition_encoder, main_block=None, fp32=False)
+    FSDP2_warpper(
+        None, condition_encoder, main_block=Qwen2_5_VLDecoderLayer, fp32=False
+    )
+    if args.training_config.num_to_explicit_prefetching is not None:
+        set_modules_to_forward_prefetch(
+            condition_encoder,
+            block_name="model.language_model.layers",
+            num_to_forward_prefetch=args.training_config.num_to_explicit_prefetching,
+        )
+        set_modules_to_backward_prefetch(
+            condition_encoder,
+            block_name="model.language_model.layers",
+            num_to_backward_prefetch=args.training_config.num_to_explicit_prefetching,
+        )
     torch.cuda.empty_cache()
     if global_rank == 0:
         print(
@@ -189,11 +208,31 @@ def train(args):
     simple_model_config = ModelArgs()
     with init_empty_weights():
         model = Transformer2DModel.from_model_args(simple_model_config)
+    torch.cuda.empty_cache()
+    if global_rank == 0:
+        print(f"Init model, memory allocated: {get_memory_allocated()} GiB")
+
     model.gradient_checkpointing = args.training_config.gradient_checkpointing
     model.train()
+    # model.requires_grad_(False)
+    # model.img_in.requires_grad_(True)
     FSDP2_mix_warpper(None, model, TransformerBlock, norm_to_fp32=nn.LayerNorm)
+
     if args.training_config.weight_init is not None:
-        load_safetensors(model, args.training_config.weight_init)
+        msg = load_safetensors(model, args.training_config.weight_init)
+        if global_rank == 0:
+            print(f"Init weight from {args.training_config.weight_init}, {msg}")
+    if args.training_config.num_to_explicit_prefetching is not None:
+        set_modules_to_forward_prefetch(
+            model,
+            block_name="transformer_blocks",
+            num_to_forward_prefetch=args.training_config.num_to_explicit_prefetching,
+        )
+        set_modules_to_backward_prefetch(
+            model,
+            block_name="transformer_blocks",
+            num_to_backward_prefetch=args.training_config.num_to_explicit_prefetching,
+        )
     torch.cuda.empty_cache()
     if global_rank == 0:
         print(f"Fully_shard main model, memory allocated: {get_memory_allocated()} GiB")
@@ -231,14 +270,19 @@ def train(args):
     )
     if resume_checkpoint_path is not None:
         checkpointer.load_model(model, resume_checkpoint_path)
-    else:
+        if global_rank == 0:
+            print(f"Resume weight from {resume_checkpoint_path}")
+    elif args.training_config.weight_init is None:
         model.to_empty(device=device)
         model.reset_parameters()
+        if global_rank == 0:
+            print(f"Train from scratch")
 
     # ---- prepare optimizer ----
-    # if global_rank == 0:
-    #     for n, p in model.named_parameters():
-    #         print(n, p.requires_grad)
+    if global_rank == 0:
+        for n, p in model.named_parameters():
+            if global_rank == 0:
+                print(n, p.requires_grad)
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=args.training_config.learning_rate
     )
@@ -265,6 +309,7 @@ def train(args):
     accum_loss = 0.0
     global_step = initial_global_step
     optimizer.zero_grad()
+
     for batch_idx, batch in enumerate(tqdm(dataloader)):
         prompt_inputs = batch["prompt_inputs"].to(device, non_blocking=True)
         image_ref = batch["img_ref"]
@@ -301,9 +346,9 @@ def train(args):
         )
         with autocast(device_type="cuda", dtype=weight_dtype):
             # forward
-            print(
-                f"latent_model_input: {latent_model_input.shape}, prompt_embeds: {prompt_embeds.shape}, img_shapes: {img_shapes}, txt_seq_lens: {txt_seq_lens}"
-            )
+            # print(
+            #     f"RANK[{global_rank}], latent_model_input: {latent_model_input.shape}, prompt_embeds: {prompt_embeds.shape}, img_shapes: {img_shapes}, txt_seq_lens: {txt_seq_lens}"
+            # )
             noise_pred = model(
                 hidden_states=latent_model_input,
                 timestep=timestep / 1000,
@@ -350,6 +395,45 @@ def train(args):
                 and global_step % args.training_config.save_interval == 0
             ):
                 checkpointer.save(model, optimizer, f"checkpoints-{global_step}")
+
+            # vis
+            if (
+                global_step % args.training_config.validation_steps == 0
+                and args.dataset_config.val_data_txt is not None
+            ):
+                with open(args.dataset_config.val_data_txt, "r", encoding="utf-8") as f:
+                    val_data = f.readlines()
+                val_data = [i.strip().split(",") for i in val_data]
+                val_data = [[i[0], ",".join(i[1:])] for i in val_data]
+                pipe = QwenImageEditPipeline(
+                    transformer=model,
+                    vae=vae,
+                    text_encoder=condition_encoder,
+                    scheduler=scheduler,
+                    processor=processor,
+                    tokenizer=None,
+                )
+                torch.cuda.empty_cache()
+                images = []
+                for image_path, prompt in val_data:
+                    image = Image.open(image_path).convert("RGB")
+                    inputs = {
+                        "image": image,
+                        "prompt": prompt,
+                        "generator": torch.manual_seed(0),
+                        "true_cfg_scale": 4.0,
+                        "negative_prompt": " ",
+                        "num_inference_steps": 24,
+                    }
+
+                    with torch.no_grad() and torch.amp.autocast(
+                        "cuda", dtype=weight_dtype
+                    ):
+                        output = pipe(**inputs)
+                        output_image = output.images[0]
+                    images.append(wandb.Image(output_image, caption=prompt))
+                if global_rank == 0:
+                    wandb.log({"vis": images}, step=global_step)
 
     if (batch_idx + 1) % grad_accum_steps != 0:
         optimizer.step()

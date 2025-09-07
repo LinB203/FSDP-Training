@@ -38,7 +38,8 @@ def load_safetensors(model: FSDPModule, last_model_checkpoint: str):
             sharded_meta_param.placements,
         )
         sharded_sd[param_name] = nn.Parameter(sharded_tensor)
-    model.load_state_dict(sharded_sd, strict=False, assign=True)
+    msg = model.load_state_dict(sharded_sd, strict=False, assign=True)
+    return msg
 
 
 # 用法

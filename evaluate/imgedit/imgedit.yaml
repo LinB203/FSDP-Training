@@ -1,0 +1,17 @@
+model_name_or_path: "/mnt/data/checkpoints/Qwen/Qwen-Image-Edit/transformer/merged.pt"
+condition_encoder_name_or_path: "/mnt/data/checkpoints/Qwen/Qwen-Image-Edit/text_encoder"
+condition_processor_name_or_path: "/mnt/data/checkpoints/Qwen/Qwen-Image-Edit/processor"
+vae_name_or_path: "/mnt/data/checkpoints/Qwen/Qwen-Image-Edit/vae"
+scheduler_name_or_path: "/mnt/data/checkpoints/Qwen/Qwen-Image-Edit/scheduler"
+
+seed: 42
+allow_tf32: false
+
+output_dir: /mnt/data/lb/FSDP-Training/eval_output/imgedit
+
+num_images_per_prompt: 1
+num_inference_steps: 28
+guidance_scale: 3.5
+
+imgedit_prompt_path: eval_prompts/basic_edit.json
+imgedit_image_dir: /mnt/data/lb/Remake/imgedit_bench_eval_images

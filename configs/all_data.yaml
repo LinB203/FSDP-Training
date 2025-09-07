@@ -6,11 +6,13 @@ training_config:
   learning_rate: 1e-5
   grad_accum_steps: 1
   log_interval: 1
+  validation_steps: 250
   max_grad_norm: 1.0
-  save_interval: 10
+  save_interval: 250
+  output_dir: "checkpoints/all_data"
   wandb_proj_name: "qwen-image-edit-train"
-  wandb_run_name: "test"
-  weight_init: null
+  wandb_run_name: "all_data"
+  weight_init: "/mnt/data/checkpoints/Qwen/Qwen-Image-Edit/transformer/merged.pt"
   resume_from_checkpoint: "latest"
 
 model_config:
@@ -20,5 +22,7 @@ model_config:
   scheduler_name_or_path: "/mnt/data/checkpoints/Qwen/Qwen-Image-Edit/scheduler"
 
 dataset_config:
+  data_txt: /mnt/data/lb/FSDP-Training/configs/all_data.txt
+  val_data_txt: /mnt/data/lb/FSDP-Training/configs/all_val_data.txt
   batch_size: 1
   num_workers: 8

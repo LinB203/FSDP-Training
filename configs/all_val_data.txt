@@ -1,0 +1,4 @@
+/mnt/data/lb/FSDP-Training/assets/logo.png,replace "Uni" to "你好"
+/mnt/data/lb/FSDP-Training/assets/couple.png,Create a cute 3D chibi scene inside a crystal ball placed by a window, with warm sunlight casting golden light.
+/mnt/data/lb/FSDP-Training/assets/woman.jpg,Enhance the makeup of the person, deepen the lip color, and adjust the overall style to a dark gothic aesthetic.
+/mnt/data/lb/FSDP-Training/assets/woman.jpg,Transform the person into a cartoon-style figurine and place them within a photo frame.
