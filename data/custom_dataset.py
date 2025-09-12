@@ -1,4 +1,5 @@
 import os
+import sys
 import cv2
 import json
 import random
@@ -12,6 +13,11 @@ from torch.utils.data import Dataset
 
 from diffusers.image_processor import VaeImageProcessor
 
+from pathlib import Path
+
+here = Path(__file__).resolve()
+project_root = here.parents[1]
+sys.path.insert(0, str(project_root))
 from utils.dataset_utils import PREFERRED_KONTEXT_RESOLUTIONS, calculate_dimensions
 
 text_edit_temp = [
@@ -29,6 +35,22 @@ text_edit_temp = [
     '修改 "{}" 为 "{}"',
     '移除 "{}" 为 "{}"',
     '替换 "{}" 为 "{}"',
+]
+text_edit_temp_wbox = [
+    'change "{}" to "{}" within red box',
+    'replace "{}" to "{}" within red box',
+    'replace "{}" with "{}" within red box',
+    'replace the text "{}" with "{}" within red box',
+    'modify "{}" to "{}" within red box',
+    'Help me change "{}" to "{}" within red box',
+    'Can you remove "{}", add "{}" within red box',
+    'I want to change the letter "{}" to "{}" within red box',
+    '将红框里的文本 "{}" 替换为 "{}"',
+    '更改红框内的文本 "{}" 为 "{}"',
+    '把红框里的 "{}" 改成 "{}"',
+    '修改红框内的 "{}" 为 "{}"',
+    '移除红框里的 "{}" 为 "{}"',
+    '替换红框内的 "{}" 为 "{}"',
 ]
 
 
@@ -145,28 +167,90 @@ class CustomDataset(Dataset):
         _, w, h = min(
             (abs(aspect_ratio - w / h), w, h) for w, h in PREFERRED_KONTEXT_RESOLUTIONS
         )
-        if "rec_polys" in item:
+        if "rec_polys" in item:  # for text-edit
+            ref_text = item["text"][0]
+            gt_text = item["text"][1]
+            prompt = random.choice(text_edit_temp).format(ref_text, gt_text)
             if self.reversed_text_edit_ratio > random.random():
                 tmp = deepcopy(img_ref)
                 img_ref = img_gt
                 img_gt = tmp
-                item["text"] = item["text"][::-1]
+                prompt = random.choice(text_edit_temp).format(gt_text, ref_text)
             elif self.box_guidance_text_edit_ratio > random.random():
                 img_ref = draw_red_box(img_ref, item["rec_polys"])
-            ref_text = item["text"][0]
-            gt_text = item["text"][1]
-            prompt = random.choice(text_edit_temp).format(ref_text, gt_text)
+                prompt = (
+                    random.choice(text_edit_temp).format(ref_text, gt_text)
+                    if random.random() > 0.5
+                    else random.choice(text_edit_temp_wbox).format(ref_text, gt_text)
+                )
+        elif "aug_text" in item:  # for NHR-Edit
+            if random.random() > 0.34:
+                prompt = random.choice(item["aug_text"])
+            else:
+                prompt = item["text"]
         else:
             prompt = item["text"]
 
         # w, h = 128, 128
-        img_ref = self.image_processor.resize(img_ref, w, h)
+        img_ref = self.image_processor.resize(img_ref, h, w)
         prompt_image = img_ref  # PIL.Image
 
         # 3 1 h w, [-1, 1]
-        img_ref = self.image_processor.preprocess(img_ref, w, h).transpose(0, 1)
-        img_gt = self.image_processor.preprocess(img_gt, w, h).transpose(0, 1)
+        img_ref = self.image_processor.preprocess(img_ref, h, w).transpose(0, 1)
+        img_gt = self.image_processor.preprocess(img_gt, h, w).transpose(0, 1)
 
         template = self.prompt_template_encode
         txt = template.format(prompt)
         return dict(txt=txt, prompt_image=prompt_image, img_gt=img_gt, img_ref=img_ref)
+
+
+if __name__ == "__main__":
+    from diffusers.image_processor import VaeImageProcessor
+    from torch.utils.data import DataLoader
+
+    # If they are tensors, optionally convert one back to PIL and save for quick visual check
+    def tensor_to_pil(tensor_or_arr, save_path=None):
+        arr = tensor_or_arr.detach().cpu().numpy()
+        print(arr.shape, arr.max(), arr.min())
+        arr = arr[:, 0]  # -> (C,H,W)
+        # (C,H,W) -> (H,W,C)
+        arr = np.transpose(arr, (1, 2, 0))
+        # arr expected in [-1,1] or [0,1]
+        arr = (arr + 1.0) * 127.5
+        arr = np.clip(arr, 0, 255).astype(np.uint8)
+        pil = Image.fromarray(arr)
+        if save_path:
+            pil.save(save_path)
+        return pil
+
+    class SimpleNamespace:
+        def __init__(self, **kwargs):
+            for k, v in kwargs.items():
+                setattr(self, k, v)
+
+    dataset_config = SimpleNamespace(
+        data_txt="/mnt/data/lb/FSDP-Training/configs/test.txt",
+        reversed_text_edit_ratio=0.5,
+        box_guidance_text_edit_ratio=0.5,
+    )
+    args = SimpleNamespace(dataset_config=dataset_config)
+    image_processor = VaeImageProcessor(vae_scale_factor=8 * 2)
+    ds = CustomDataset(args, image_processor)
+    dataloader = DataLoader(
+        ds, batch_size=1, shuffle=True, num_workers=0, collate_fn=lambda x: x
+    )
+    for i, item in enumerate(tqdm(dataloader)):
+        print(item)
+        item = item[0]
+        img_ref = item.get("img_ref", None)
+        img_gt = item.get("img_gt", None)
+
+        print(item["txt"])
+        pil_ref = tensor_to_pil(img_ref, save_path=f"sample_{i}_ref.png")
+        pil_gt = tensor_to_pil(img_gt, save_path=f"sample_{i}_gt.png")
+        if pil_ref:
+            print("Saved img_ref as PNG.")
+        if pil_gt:
+            print("Saved img_gt as PNG.")
+        if i == 3:
+            break

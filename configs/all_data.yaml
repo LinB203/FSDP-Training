@@ -26,3 +26,5 @@ dataset_config:
   val_data_txt: /mnt/data/lb/FSDP-Training/configs/all_val_data.txt
   batch_size: 1
   num_workers: 8
+  reversed_text_edit_ratio: 0.67
+  box_guidance_text_edit_ratio: 0.5

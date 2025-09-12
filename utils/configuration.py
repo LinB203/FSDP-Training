@@ -27,8 +27,8 @@ class TrainingConfig:
 class DatasetConfig:
     data_txt: Optional[str] = None
     val_data_txt: Optional[str] = None
-    batch_size: int = 16
-    num_workers: int = 4
+    batch_size: int = 1
+    num_workers: int = 8
 
     reversed_text_edit_ratio: float = 0.0
     box_guidance_text_edit_ratio: float = 0.0
