@@ -8,14 +8,14 @@ training_config:
   learning_rate: 1e-5
   grad_accum_steps: 1
   log_interval: 1
-  validation_steps: 1000
+  validation_steps: 5
   max_grad_norm: 1.0
-  save_interval: 1000
+  save_interval: 5
   enable_ema: true
-  output_dir: "checkpoints/all_data"
+  output_dir: "checkpoints/test_ema"
   wandb_proj_name: "qwen-image-edit-train"
-  wandb_run_name: "all_data"
-  weight_init: "/mnt/data/checkpoints/Qwen/Qwen-Image-Edit/transformer/merged.pt"
+  wandb_run_name: "test_ema"
+  weight_init: null
   resume_from_checkpoint: "latest"
 
 model_config:
@@ -23,10 +23,11 @@ model_config:
   condition_processor_name_or_path: "/mnt/data/checkpoints/Qwen/Qwen-Image-Edit/processor"
   vae_name_or_path: "/mnt/data/checkpoints/Qwen/Qwen-Image-Edit/vae"
   scheduler_name_or_path: "/mnt/data/checkpoints/Qwen/Qwen-Image-Edit/scheduler"
+  test_num_layers: 4
 
 dataset_config:
-  data_txt: /mnt/data/lb/FSDP-Training/configs/all_data.txt
-  val_data_txt: /mnt/data/lb/FSDP-Training/configs/all_val_data.txt
+  data_txt: /mnt/data/lb/FSDP-Training/configs/test.txt
+  val_data_txt: /mnt/data/lb/FSDP-Training/configs/test_val.txt
   batch_size: 1
   num_workers: 12
   reversed_text_edit_ratio: 0.67

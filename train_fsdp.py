@@ -2,6 +2,7 @@ import os
 import wandb
 import random
 import string
+import datetime
 import argparse
 
 from tqdm import tqdm
@@ -41,6 +42,7 @@ from models.transformer import (
     TransformerBlock,
 )
 from data.custom_dataset import CustomDataset
+from utils.ema import EMA
 from utils.configuration import Config
 from utils.checkpoint import Checkpointer
 from utils.merge_safetensors import load_safetensors
@@ -147,6 +149,28 @@ def prepare_dataloader(args, image_processor, processor, rank, world_size):
 #     return components
 
 
+@torch.inference_mode()
+def log_validation(pipe, val_data, global_rank, global_step, weight_dtype, log_pannel):
+    images = []
+    for image_path, prompt in val_data:
+        image = Image.open(image_path).convert("RGB")
+        inputs = {
+            "image": image,
+            "prompt": prompt,
+            "generator": torch.manual_seed(0),
+            "true_cfg_scale": 4.0,
+            "negative_prompt": " ",
+            "num_inference_steps": 24,
+        }
+
+        with torch.no_grad() and torch.amp.autocast("cuda", dtype=weight_dtype):
+            output = pipe(**inputs)
+            output_image = output.images[0]
+        images.append(wandb.Image(output_image, caption=prompt))
+    if global_rank == 0:
+        wandb.log({log_pannel: images}, step=global_step)
+
+
 def train(args):
     logger = get_logger()
     setup_distributed_env()
@@ -179,25 +203,33 @@ def train(args):
     processor = Qwen2VLProcessor.from_pretrained(
         args.model_config.condition_processor_name_or_path
     )
-    condition_encoder = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-        args.model_config.condition_encoder_name_or_path,
-        torch_dtype=weight_dtype,
-        attn_implementation="sdpa",
-    ).eval()
-    FSDP2_warpper(
-        None, condition_encoder, main_block=Qwen2_5_VLDecoderLayer, fp32=False
+    condition_encoder = (
+        Qwen2_5_VLForConditionalGeneration.from_pretrained(
+            args.model_config.condition_encoder_name_or_path,
+            torch_dtype=weight_dtype,
+            attn_implementation="sdpa",
+        )
+        .to(device)
+        .eval()
     )
-    if args.training_config.num_to_explicit_prefetching is not None:
-        set_modules_to_forward_prefetch(
-            condition_encoder,
-            block_name="model.language_model.layers",
-            num_to_forward_prefetch=args.training_config.num_to_explicit_prefetching,
-        )
-        set_modules_to_backward_prefetch(
-            condition_encoder,
-            block_name="model.language_model.layers",
-            num_to_backward_prefetch=args.training_config.num_to_explicit_prefetching,
-        )
+    # FSDP2_warpper(
+    #     None,
+    #     condition_encoder,
+    #     main_block=Qwen2_5_VLDecoderLayer,
+    #     fp32=False,
+    #     # reshard_after_forward=args.training_config.reshard_after_forward,
+    # )
+    # if args.training_config.num_to_explicit_prefetching is not None:
+    #     set_modules_to_forward_prefetch(
+    #         condition_encoder,
+    #         block_name="model.language_model.layers",
+    #         num_to_forward_prefetch=args.training_config.num_to_explicit_prefetching,
+    #     )
+    #     set_modules_to_backward_prefetch(
+    #         condition_encoder,
+    #         block_name="model.language_model.layers",
+    #         num_to_backward_prefetch=args.training_config.num_to_explicit_prefetching,
+    #     )
     torch.cuda.empty_cache()
     if global_rank == 0:
         print(
@@ -206,6 +238,8 @@ def train(args):
 
     # ---- create model ----
     simple_model_config = ModelArgs()
+    if args.model_config.test_num_layers > 0:
+        simple_model_config = ModelArgs(num_layers=args.model_config.test_num_layers)
     with init_empty_weights():
         model = Transformer2DModel.from_model_args(simple_model_config)
     torch.cuda.empty_cache()
@@ -216,7 +250,13 @@ def train(args):
     model.train()
     # model.requires_grad_(False)
     # model.img_in.requires_grad_(True)
-    FSDP2_mix_warpper(None, model, TransformerBlock, norm_to_fp32=nn.LayerNorm)
+    FSDP2_mix_warpper(
+        None,
+        model,
+        TransformerBlock,
+        norm_to_fp32=nn.LayerNorm,
+        reshard_after_forward=args.training_config.reshard_after_forward,
+    )
 
     if args.training_config.weight_init is not None:
         msg = load_safetensors(model, args.training_config.weight_init)
@@ -240,7 +280,7 @@ def train(args):
     # ---- load vae ----
     vae = AutoencoderKLQwenImage.from_pretrained(args.model_config.vae_name_or_path)
     vae = vae.eval().to(device=device, dtype=weight_dtype)
-    vae = torch.compile(vae)
+    # vae = torch.compile(vae)
     latents_mean = (
         torch.tensor(vae.config.latents_mean)
         .view(1, vae.config.z_dim, 1, 1)
@@ -278,11 +318,23 @@ def train(args):
         if global_rank == 0:
             print(f"Train from scratch")
 
+    if args.training_config.enable_ema:
+        ema_model = EMA(
+            model,
+            decay=args.training_config.ema_decay,
+            fsdp_resharded=args.training_config.reshard_after_forward,
+        )
+        torch.cuda.empty_cache()
+        if global_rank == 0:
+            print(
+                f"Fully_shard ema model, memory allocated: {get_memory_allocated()} GiB"
+            )
+
     # ---- prepare optimizer ----
-    if global_rank == 0:
-        for n, p in model.named_parameters():
-            if global_rank == 0:
-                print(n, p.requires_grad)
+    # if global_rank == 0:
+    #     for n, p in model.named_parameters():
+    #         if global_rank == 0:
+    #             print(n, p.requires_grad)
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=args.training_config.learning_rate
     )
@@ -305,6 +357,8 @@ def train(args):
         print(f"  Instantaneous batch size per device = {batch_size}")
         print(f"  Gradient Accumulation steps = {grad_accum_steps}")
         print(f"  Total train batch size (w. accumulation) = {total_batch_size}")
+        print(f"  Total parameters = {sum(p.numel() for p in model.parameters())/1e9}B")
+
     running_loss = 0.0
     accum_loss = 0.0
     global_step = initial_global_step
@@ -379,6 +433,12 @@ def train(args):
             running_loss += avg_loss_this_step
             accum_loss = 0.0
 
+            if args.training_config.enable_ema:
+                if ema_model.is_registered:
+                    ema_model.update()
+                elif global_step >= args.training_config.ema_start_step:
+                    ema_model.register()
+
             # logging
             if (
                 global_rank == 0
@@ -386,7 +446,9 @@ def train(args):
             ):
                 avg = running_loss / args.training_config.log_interval
                 wandb.log({"train/loss": avg}, step=global_step)
-                print(f"Step[{global_step}]: loss-{avg:.6f}")
+                print(
+                    f"[{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Step[{global_step}]: loss-{avg:.6f}"
+                )
                 running_loss = 0.0
 
             # checkpoint
@@ -395,6 +457,14 @@ def train(args):
                 and global_step % args.training_config.save_interval == 0
             ):
                 checkpointer.save(model, optimizer, f"checkpoints-{global_step}")
+
+                if args.training_config.enable_ema and ema_model.is_registered:
+                    ema_model.state_dict_full_rank0_cpu(
+                        os.path.join(
+                            args.training_config.output_dir,
+                            f"checkpoints-{global_step}/ema_model.pt",
+                        )
+                    )
 
             # vis
             if (
@@ -414,26 +484,43 @@ def train(args):
                     tokenizer=None,
                 )
                 torch.cuda.empty_cache()
-                images = []
-                for image_path, prompt in val_data:
-                    image = Image.open(image_path).convert("RGB")
-                    inputs = {
-                        "image": image,
-                        "prompt": prompt,
-                        "generator": torch.manual_seed(0),
-                        "true_cfg_scale": 4.0,
-                        "negative_prompt": " ",
-                        "num_inference_steps": 24,
-                    }
+                log_validation(
+                    pipe,
+                    val_data,
+                    global_rank,
+                    global_step,
+                    weight_dtype,
+                    log_pannel="vis",
+                )
 
-                    with torch.no_grad() and torch.amp.autocast(
-                        "cuda", dtype=weight_dtype
-                    ):
-                        output = pipe(**inputs)
-                        output_image = output.images[0]
-                    images.append(wandb.Image(output_image, caption=prompt))
-                if global_rank == 0:
-                    wandb.log({"vis": images}, step=global_step)
+                if args.training_config.enable_ema and ema_model.is_registered:
+                    torch.distributed.barrier()
+                    for module in model.modules():
+                        if isinstance(module, torch.distributed.fsdp.FSDPModule):
+                            module.reshard()
+                    torch.distributed.barrier()
+                    ema_model.apply_shadow()
+                    torch.distributed.barrier()
+                    log_validation(
+                        pipe,
+                        val_data,
+                        global_rank,
+                        global_step,
+                        weight_dtype,
+                        log_pannel="vis_ema",
+                    )
+                    torch.distributed.barrier()
+                    for module in model.modules():
+                        if isinstance(module, torch.distributed.fsdp.FSDPModule):
+                            module.reshard()
+                    torch.distributed.barrier()
+                    ema_model.restore()
+                    torch.distributed.barrier()
+                    for module in model.modules():
+                        if isinstance(module, torch.distributed.fsdp.FSDPModule):
+                            module.reshard()
+                    torch.distributed.barrier()
+                    torch.cuda.empty_cache()
 
     if (batch_idx + 1) % grad_accum_steps != 0:
         optimizer.step()

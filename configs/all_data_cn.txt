@@ -15,10 +15,7 @@
 /mnt/data/datasets/Afeng-x/PixWizard-Data-500k,/mnt/data/datasets/Afeng-x/PixWizard-Data-500k,/mnt/data/datasets/Afeng-x/PixWizard-Data-500k/final_annos/edit_pixwizard_500844_cn.json
 /mnt/data/datasets/handsomeWilliam/Relation252K,/mnt/data/datasets/handsomeWilliam/Relation252K,/mnt/data/datasets/handsomeWilliam/Relation252K/edit_allrelation_8763_cn.json
 /mnt/data/datasets/handsomeWilliam/Relation252K,/mnt/data/datasets/handsomeWilliam/Relation252K,/mnt/data/datasets/handsomeWilliam/Relation252K/edit_allrelation_small_2861_cn.json
-/mnt/data/datasets/iitolstykh/NHR-Edit,/mnt/data/datasets/iitolstykh/NHR-Edit,/mnt/data/datasets/iitolstykh/NHR-Edit/edit_nhredit_358463_cn.json
-/mnt/data/datasets/iitolstykh/NHR-Edit,/mnt/data/datasets/iitolstykh/NHR-Edit,/mnt/data/datasets/iitolstykh/NHR-Edit/edit_nhredit_358463_cn.json
-/mnt/data/datasets/iitolstykh/NHR-Edit,/mnt/data/datasets/iitolstykh/NHR-Edit,/mnt/data/datasets/iitolstykh/NHR-Edit/edit_nhredit_358463_cn.json
-/mnt/data/datasets/iitolstykh/NHR-Edit,/mnt/data/datasets/iitolstykh/NHR-Edit,/mnt/data/datasets/iitolstykh/NHR-Edit/edit_nhredit_358463_cn.json
+/mnt/data/datasets/iitolstykh/NHR-Edit/train,/mnt/data/datasets/iitolstykh/NHR-Edit/train,/mnt/data/datasets/iitolstykh/NHR-Edit/edit_nhredit_358463_cn.json
 /mnt/data/datasets/FreedomIntelligence/ShareGPT-4o-Image,/mnt/data/datasets/FreedomIntelligence/ShareGPT-4o-Image,/mnt/data/datasets/FreedomIntelligence/ShareGPT-4o-Image/edit_sharegpt4oimage_28732_cn.json
 /mnt/data/datasets/UCSC-VLAA/GPT-Image-Edit-1.5M/gpt-edit/hqedit/hqedit/edit,/mnt/data/datasets/UCSC-VLAA/GPT-Image-Edit-1.5M/gpt-edit/hqedit/hqedit/edit,/mnt/data/datasets/UCSC-VLAA/GPT-Image-Edit-1.5M/edit_gptimageedit_hqedit_gpt_edit_89585_cn.json
 /mnt/data/datasets/UCSC-VLAA/GPT-Image-Edit-1.5M/gpt-edit/hqedit/hqedit/generate,/mnt/data/datasets/UCSC-VLAA/GPT-Image-Edit-1.5M/gpt-edit/hqedit/hqedit/generate,/mnt/data/datasets/UCSC-VLAA/GPT-Image-Edit-1.5M/edit_gptimageedit_hqedit_gpt_generate_93597_cn.json
@@ -26,3 +23,11 @@
 /mnt/data/datasets/UCSC-VLAA/GPT-Image-Edit-1.5M/gpt-edit/omniedit,/mnt/data/datasets/UCSC-VLAA/GPT-Image-Edit-1.5M/gpt-edit/omniedit,/mnt/data/datasets/UCSC-VLAA/GPT-Image-Edit-1.5M/edit_gptimageedit_omniedit_gpt_rewrite_100000_cn.json
 /mnt/data/datasets/UCSC-VLAA/GPT-Image-Edit-1.5M/gpt-edit/omniedit/complex-edit,/mnt/data/datasets/UCSC-VLAA/GPT-Image-Edit-1.5M/gpt-edit/omniedit/complex-edit,/mnt/data/datasets/UCSC-VLAA/GPT-Image-Edit-1.5M/edit_gptimageedit_complexedit_gpt_313298_cn.json
 /mnt/data/datasets/UCSC-VLAA/GPT-Image-Edit-1.5M/gpt-edit/ultraedit/ultraedit,/mnt/data/datasets/UCSC-VLAA/GPT-Image-Edit-1.5M/gpt-edit/ultraedit/ultraedit,/mnt/data/datasets/UCSC-VLAA/GPT-Image-Edit-1.5M/edit_gptimageedit_ultraedit_gpt_100008_cn.json
+/mnt/data/datasets/Yejy53/Nano-consistent-150k,/mnt/data/datasets/Yejy53/Nano-consistent-150k,/mnt/data/datasets/Yejy53/Nano-consistent-150k/Nano-150k/json/action_cleaned_20714_cn.json
+/mnt/data/datasets/Yejy53/Nano-consistent-150k,/mnt/data/datasets/Yejy53/Nano-consistent-150k,/mnt/data/datasets/Yejy53/Nano-consistent-150k/Nano-150k/json/action_cleaned_general_prompt_20714_cn.json
+/mnt/data/datasets/Yejy53/Nano-consistent-150k,/mnt/data/datasets/Yejy53/Nano-consistent-150k,/mnt/data/datasets/Yejy53/Nano-consistent-150k/Nano-150k/json/background_cleaned_30585_cn.json
+/mnt/data/datasets/Yejy53/Nano-consistent-150k,/mnt/data/datasets/Yejy53/Nano-consistent-150k,/mnt/data/datasets/Yejy53/Nano-consistent-150k/Nano-150k/json/background_cleaned_general_prompt_30585_cn.json
+/mnt/data/datasets/Yejy53/Nano-consistent-150k,/mnt/data/datasets/Yejy53/Nano-consistent-150k,/mnt/data/datasets/Yejy53/Nano-consistent-150k/Nano-150k/json/black_headshot_cleaned_16268_cn.json
+/mnt/data/datasets/Yejy53/Nano-consistent-150k,/mnt/data/datasets/Yejy53/Nano-consistent-150k,/mnt/data/datasets/Yejy53/Nano-consistent-150k/Nano-150k/json/hairstyle_cleaned_15076_cn.json
+/mnt/data/datasets/Yejy53/Nano-consistent-150k,/mnt/data/datasets/Yejy53/Nano-consistent-150k,/mnt/data/datasets/Yejy53/Nano-consistent-150k/Nano-150k/json/sweet_headshot_cleaned_15092_cn.json
+/mnt/data/datasets/Yejy53/Nano-consistent-150k,/mnt/data/datasets/Yejy53/Nano-consistent-150k,/mnt/data/datasets/Yejy53/Nano-consistent-150k/Nano-150k/json/Times-Change_cleaned_16710_cn.json

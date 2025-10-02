@@ -21,6 +21,10 @@ class TrainingConfig:
     resume_from_checkpoint: Optional[str] = "latest"
     checkpoints_total_limit: Optional[int] = None
     num_to_explicit_prefetching: Optional[int] = None
+    reshard_after_forward: bool = False
+    enable_ema: bool = False
+    ema_decay: float = 0.999
+    ema_start_step: int = 0
 
 
 @dataclass
@@ -40,6 +44,7 @@ class ModelConfig:
     condition_processor_name_or_path: str
     vae_name_or_path: str
     scheduler_name_or_path: str
+    test_num_layers: int = -1
 
 
 @dataclass
