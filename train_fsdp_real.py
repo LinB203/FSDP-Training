@@ -145,7 +145,13 @@ def train(args):
         f"Model init done. Memory allocated: {torch.cuda.memory_allocated() / 1024**3:.2f} GiB",
     )
 
-    FSDP2_mix_warpper(None, model, TransformerBlock, norm_to_fp32=RMSNorm)
+    FSDP2_mix_warpper(
+        None,
+        model,
+        TransformerBlock,
+        norm_to_fp32=RMSNorm,
+        reshard_after_forward=args.reshard_after_forward,
+    )
 
     rank_log(
         global_rank,
@@ -158,7 +164,14 @@ def train(args):
     criterion = torch.nn.CrossEntropyLoss(ignore_index=-100)
 
     # ---- load checkpoint if present ----
-    checkpointer = Checkpointer("checkpoints", dcp_api=args.dcp_api)
+    checkpointer = Checkpointer(
+        "checkpoints",
+        dcp_api=args.dcp_api,
+        model=model,
+        enable_ema=args.enable_ema,
+        decay=args.ema_decay,
+        fsdp_resharded=args.reshard_after_forward,
+    )
     if checkpointer.last_training_time is not None:
         checkpointer.load_model(model)
         checkpointer.load_optim(model, optimizer)
@@ -204,6 +217,11 @@ def train(args):
             loss = criterion(logits_flat, labels_flat)
             loss.backward()
             optimizer.step()
+            if args.enable_ema:
+                if checkpointer.ema_is_registered:
+                    checkpointer.ema_update()
+                else:
+                    checkpointer.ema_register()
 
             running_loss += loss.item()
             if global_rank == 0 and batch_idx % args.log_interval == 0:
@@ -215,6 +233,18 @@ def train(args):
                 )
                 running_loss = 0.0
 
+        if args.enable_ema and checkpointer.ema_is_registered:
+            for module in model.modules():
+                if isinstance(module, torch.distributed.fsdp.FSDPModule):
+                    module.reshard()
+            checkpointer.ema_apply_shadow()
+            output = model(
+                input_ids
+            )  # test forward, maybe some log_validation function
+            for module in model.modules():
+                if isinstance(module, torch.distributed.fsdp.FSDPModule):
+                    module.reshard()
+            checkpointer.ema_restore()
         checkpointer.save(model, optimizer)
 
     rank_log(global_rank, logger, "Training complete.")

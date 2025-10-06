@@ -27,7 +27,8 @@ torchrun \
   --batch_size 1 \
   --epochs 3 \
   --seq_len 8192 \
-  --lr 1e-4  --gradient_checkpointing
+  --lr 1e-4  --gradient_checkpointing \
+  --enable_ema --ema_decay 0.0 --reshard_after_forward
 
 
 

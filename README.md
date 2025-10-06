@@ -39,7 +39,7 @@ torchrun \
 
 ## FSDP+TP+SP
 
-TP for MLP (`--tp_size 2`), SP for attn_head (` --head_sp`)
+TP for nn.Linear (MLP & Attention) (`--tp_size 2`)
 
 ```
 torchrun \
@@ -116,7 +116,7 @@ The results:
 
 ## Benchmark
 
-14B model
+13B model
 
 | FSDP Config | TP×DP | Gradient Checkpointing | 2048 (tokens) | 4096 (tokens) | 8192 (tokens) | 16384 (tokens) |
 |-------------|-------|-------------------------|---------------|---------------|---------------|----------------|
@@ -124,6 +124,13 @@ The results:
 | ✅          | 1×8   | ✓                       | 1.3s/it • 73G | 2.4s/it • 77G | OOM           | OOM            |
 | ✅          | 2×4   | ✗                       | 0.8s/it • 57G | 1.1s/it • 71G | OOM           | OOM            |
 | ✅          | 2×4   | ✓                       | 1.0s/it • 55G | 1.4s/it • 57G | 2.7s/it • 65G | 5.8s/it • 70G |
+
+`--reshard_after_forward`
+
+| FSDP Config | TP×DP | Gradient Checkpointing | 16384 (tokens) | 32768 (tokens) |
+|-------------|-------|-------------------------|---------------|---------------|
+| ✅          | 1×8   | ✓                       | 10.4s/it • 71G | 25.6s/it • 80G |
+| ✅          | 2×4   | ✓                       | 5.8s/it • 65G | 13.7s/it • 80GG | 
 
 
 ## References

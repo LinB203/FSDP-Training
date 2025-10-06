@@ -6,7 +6,7 @@ from torch.distributed.fsdp import (
 )
 
 
-def FSDP2_warpper(dp_mesh, model, main_block, fp32=False):
+def FSDP2_warpper(dp_mesh, model, main_block, fp32=False, reshard_after_forward=False):
     cpu_offload = False
     mp_policy_fp32 = MixedPrecisionPolicy(
         param_dtype=torch.float32,  # 参数都以 float32 送进计算
@@ -19,7 +19,7 @@ def FSDP2_warpper(dp_mesh, model, main_block, fp32=False):
         output_dtype=torch.bfloat16,
     )
     fsdp_kwargs = {
-        "reshard_after_forward": False,
+        "reshard_after_forward": reshard_after_forward,
         "mesh": dp_mesh,
     }  # dp_mesh is None means distributed to all nodes.
 
@@ -38,7 +38,9 @@ def FSDP2_warpper(dp_mesh, model, main_block, fp32=False):
     )
 
 
-def FSDP2_mix_warpper(dp_mesh, model, main_block_to_bf16, norm_to_fp32=None):
+def FSDP2_mix_warpper(
+    dp_mesh, model, main_block_to_bf16, norm_to_fp32=None, reshard_after_forward=False
+):
     cpu_offload = False
     mp_policy_fp32 = MixedPrecisionPolicy(
         param_dtype=torch.float32,  # 参数都以 float32 送进计算
@@ -51,7 +53,7 @@ def FSDP2_mix_warpper(dp_mesh, model, main_block_to_bf16, norm_to_fp32=None):
         output_dtype=torch.bfloat16,
     )
     fsdp_kwargs = {
-        "reshard_after_forward": False,
+        "reshard_after_forward": reshard_after_forward,
         "mesh": dp_mesh,
     }  # dp_mesh is None means distributed to all nodes.
 

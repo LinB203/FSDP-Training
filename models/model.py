@@ -12,7 +12,6 @@ import torch.utils.checkpoint as cp
 
 @dataclass
 class ModelArgs:
-    head_sp: bool = False
     tp_size: int = 1
     dim: int = 4096
     n_layers: int = 32
@@ -71,22 +70,6 @@ class RMSNorm(nn.Module):
         torch.nn.init.ones_(self.weight)  # type: ignore
 
 
-class sp_head(nn.Module):
-    def __init__(
-        self,
-    ):
-        super().__init__()
-
-    def forward(self, xq, xk, xv):
-        # # (bs, n_local_heads, seqlen, head_dim)
-
-        # print(
-        #     f"in sp_head: xq.shape {xq.shape}, xk.shape {xk.shape}, xv.shape {xv.shape}, "
-        # )
-        output = F.scaled_dot_product_attention(xq, xk, xv, is_causal=True)
-        return output
-
-
 class Attention(nn.Module):
     """
     Multi-head attention module.
@@ -110,7 +93,6 @@ class Attention(nn.Module):
     def __init__(self, model_args: ModelArgs):
         super().__init__()
         self.tp_size = model_args.tp_size
-        self.head_sp = model_args.head_sp
         self.n_heads = model_args.n_heads
         self.n_kv_heads = (
             model_args.n_heads
@@ -128,7 +110,6 @@ class Attention(nn.Module):
         self.wo = nn.Linear(
             model_args.n_heads * self.head_dim, model_args.dim, bias=False
         )
-        self.sp_head = sp_head()
 
     def forward(
         self,
@@ -148,24 +129,27 @@ class Attention(nn.Module):
         # print(f'in attn: hidden_states.shape {x.shape}')
         xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
 
+        # print(
+        #     f"in attn: xq.shape {xq.shape}, xk.shape {xk.shape}, xv.shape {xv.shape}, "
+        # )
+        # print(
+        #     f"in attn local: xq._local_tensor.shape {xq._local_tensor.shape}, xk._local_tensor.shape {xk._local_tensor.shape}, xv._local_tensor.shape {xv._local_tensor.shape}, "
+        # )
         xq = xq.view(
             bsz,
             seqlen,
-            # self.n_heads // (self.tp_size if self.head_sp else 1),
             self.n_heads,
             self.head_dim,
         )
         xk = xk.view(
             bsz,
             seqlen,
-            # self.n_kv_heads // (self.tp_size if self.head_sp else 1),
             self.n_kv_heads,
             self.head_dim,
         )
         xv = xv.view(
             bsz,
             seqlen,
-            # self.n_kv_heads // (self.tp_size if self.head_sp else 1),
             self.n_kv_heads,
             self.head_dim,
         )
@@ -177,13 +161,10 @@ class Attention(nn.Module):
         xq = xq.transpose(1, 2)  # (bs, n_local_heads, seqlen, head_dim)
         xk = keys.transpose(1, 2)  # (bs, n_local_heads, seqlen, head_dim)
         xv = values.transpose(1, 2)  # (bs, n_local_heads, seqlen, head_dim)
-        # print(
-        #     f"in attn: xq.shape {xq.shape}, xk.shape {xk.shape}, xv.shape {xv.shape}, "
-        # )
 
         # we use casual mask for training
-        output = self.sp_head(xq, xk, xv)
-        # output = F.scaled_dot_product_attention(xq, xk, xv, is_causal=True)
+        # output = self.sp_head(xq, xk, xv)
+        output = F.scaled_dot_product_attention(xq, xk, xv, is_causal=True)
         # print(f"in attn: after sdpa {output.shape}")
         output = output.transpose(
             1, 2

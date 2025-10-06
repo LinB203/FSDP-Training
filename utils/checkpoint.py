@@ -16,6 +16,7 @@ from torch.distributed.tensor import distribute_tensor, DTensor
 
 
 MODEL_CHECKPOINT = "model_state_dict.pt"
+EMA_MODEL_CHECKPOINT = "ema_model_state_dict.pt"
 OPTIM_CHECKPOINT = "optim_state_dict.pt"
 PARAMS = "params"
 
@@ -37,12 +38,28 @@ def get_latest_checkpoint_folder(path):
 
 
 class Checkpointer:
-    def __init__(self, folder: str, dcp_api: bool):
+    def __init__(
+        self,
+        folder: str,
+        dcp_api: bool,
+        model: torch.distributed.fsdp.FSDPModule,
+        enable_ema: bool = True,
+        decay: float = 0.99,
+        fsdp_resharded: bool = False,
+    ):
         self.folder = folder
         self.dcp_api = dcp_api
         self.last_training_time = get_latest_checkpoint_folder(
             f"{folder}/{'dcp_api' if dcp_api else 'dtensor_api'}"
         )
+
+        self.decay = decay
+        self.fsdp_resharded = fsdp_resharded
+        self.shadow = {}
+        self.backup = {}
+        self.ema_is_registered = False
+        if enable_ema:
+            self.model = model
 
     def is_empty(self):
         return self.last_training_time is None
@@ -52,7 +69,7 @@ class Checkpointer:
             f"{self.folder}/{'dcp_api' if self.dcp_api else 'dtensor_api'}"
             f"/{self.last_training_time}/{MODEL_CHECKPOINT}"
         )
-        print(f'resume last_model_checkpoint from {last_model_checkpoint}')
+        print(f"resume last_model_checkpoint from {last_model_checkpoint}")
         full_sd = torch.load(
             last_model_checkpoint, mmap=True, weights_only=True, map_location="cpu"
         )
@@ -84,7 +101,7 @@ class Checkpointer:
             f"{self.folder}/{'dcp_api' if self.dcp_api else 'dtensor_api'}"
             f"/{self.last_training_time}/{OPTIM_CHECKPOINT}"
         )
-        print(f'resume last_optim_checkpoint from {last_optim_checkpoint}')
+        print(f"resume last_optim_checkpoint from {last_optim_checkpoint}")
         full_sd = torch.load(
             last_optim_checkpoint, mmap=True, weights_only=True, map_location="cpu"
         )
@@ -209,3 +226,50 @@ class Checkpointer:
             os.makedirs(new_checkpoint_folder, exist_ok=True)
             torch.save(model_state_dict, new_model_checkpoint)
             torch.save(optim_state_dict, new_optim_checkpoint)
+        torch.distributed.barrier()
+        cpu_state_dict = {}
+        for param_name, sharded_param in self.shadow.items():
+            full_param = sharded_param.full_tensor()
+            if torch.distributed.get_rank() == 0:
+                cpu_state_dict[param_name] = full_param.cpu()
+            else:
+                del full_param
+        if torch.distributed.get_rank() == 0:
+            new_ema_model_checkpoint = f"{new_checkpoint_folder}/{EMA_MODEL_CHECKPOINT}"
+            torch.save(cpu_state_dict, new_ema_model_checkpoint)
+        torch.distributed.barrier()
+
+    def ema_register(self):
+        if self.ema_is_registered:
+            return
+        for name, param in self.model.named_parameters():
+            if param.requires_grad:
+                assert isinstance(param, DTensor), f"{name}"
+                self.shadow[name] = param.data.clone().float()
+        self.ema_is_registered = True
+
+    def ema_update(self):
+        for name, param in self.model.named_parameters():
+            if name in self.shadow:
+                assert isinstance(param, DTensor), f"{name}"
+                assert isinstance(self.shadow[name], DTensor), f"{name}"
+                new_average = (
+                    1.0 - self.decay
+                ) * param.data.float() + self.decay * self.shadow[name].float()
+                self.shadow[name] = new_average.clone().float()
+
+    def ema_apply_shadow(self):
+        for name, param in self.model.named_parameters():
+            if name in self.shadow:
+                shadow_tensor = self.shadow[name]
+                self.backup[name] = param.data.clone()
+                assert isinstance(shadow_tensor, DTensor), f"{name}"
+                assert isinstance(param.data, DTensor), f"{name}"
+                param.data.copy_(shadow_tensor.to(param.data.device))
+
+    def ema_restore(self):
+        for name, param in self.model.named_parameters():
+            if name in self.shadow:
+                assert isinstance(self.backup[name], DTensor), f"{name}"
+                assert isinstance(param.data, DTensor), f"{name}"
+                param.data.copy_(self.backup[name])

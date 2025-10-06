@@ -32,7 +32,7 @@ from datasets import load_dataset
 from models.model import Transformer, ModelArgs, RMSNorm, TransformerBlock
 from utils.checkpoint import Checkpointer
 from utils.log_utils import rank_log, get_logger
-from utils.tp_plan import base_tp_plan, head_sp_tp_plan, tp_plan
+from utils.tp_plan import base_tp_plan, tp_plan
 from utils.fsdp2_warpper import FSDP2_mix_warpper
 
 
@@ -130,7 +130,6 @@ def make_tp_group(world_size, tp_size, global_rank):
 # ---------------------------
 def train(args):
 
-    head_sp = args.head_sp
     tp_size = args.tp_size
     logger = get_logger()
 
@@ -176,8 +175,6 @@ def train(args):
     simple_model_config = ModelArgs(
         dim=4096, n_layers=2, n_heads=32, n_kv_heads=8, vocab_size=151936
     )
-    if head_sp:
-        assert simple_model_config.n_heads % tp_size == 0
     model = Transformer.from_model_args(simple_model_config)
     model.gradient_checkpointing = args.gradient_checkpointing
     model.train()
@@ -195,7 +192,7 @@ def train(args):
     # parallelize the first embedding and the last linear out projection
     model = parallelize_module(model, tp_mesh, base_tp_plan)
     for layer_id, transformer_block in enumerate(model.layers):
-        layer_tp_plan = head_sp_tp_plan if head_sp else tp_plan
+        layer_tp_plan = tp_plan
         # Custom parallelization plan for the model
         parallelize_module(
             module=transformer_block,
@@ -203,7 +200,13 @@ def train(args):
             parallelize_plan=layer_tp_plan,
         )
 
-    FSDP2_mix_warpper(dp_mesh, model, TransformerBlock, norm_to_fp32=RMSNorm)
+    FSDP2_mix_warpper(
+        dp_mesh,
+        model,
+        TransformerBlock,
+        norm_to_fp32=RMSNorm,
+        reshard_after_forward=args.reshard_after_forward,
+    )
     rank_log(
         global_rank,
         logger,
@@ -213,7 +216,14 @@ def train(args):
 
     # optimizer & checkpoint
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, foreach=True)
-    checkpointer = Checkpointer("checkpoints", dcp_api=args.dcp_api)
+    checkpointer = Checkpointer(
+        "checkpoints",
+        dcp_api=args.dcp_api,
+        model=model,
+        enable_ema=args.enable_ema,
+        decay=args.ema_decay,
+        fsdp_resharded=args.reshard_after_forward,
+    )
     if checkpointer.last_training_time is not None:
         checkpointer.load_model(model)
         checkpointer.load_optim(model, optimizer)
@@ -289,6 +299,11 @@ def train(args):
                 running_loss += loss.item()
 
             optimizer.step()
+            if args.enable_ema:
+                if checkpointer.ema_is_registered:
+                    checkpointer.ema_update()
+                else:
+                    checkpointer.ema_register()
             if global_rank == 0 and batch_idx % args.log_interval == 0:
                 avg = running_loss / (args.log_interval if args.log_interval > 0 else 1)
                 rank_log(
@@ -299,7 +314,16 @@ def train(args):
                 running_loss = 0.0
 
         # save
-        checkpointer.save(model, optimizer)
+        if args.enable_ema and checkpointer.ema_is_registered:
+            for module in model.modules():
+                if isinstance(module, torch.distributed.fsdp.FSDPModule):
+                    module.reshard()
+            checkpointer.ema_apply_shadow()
+            output = model(in_k)  # test forward, maybe some log_validation function
+            for module in model.modules():
+                if isinstance(module, torch.distributed.fsdp.FSDPModule):
+                    module.reshard()
+            checkpointer.ema_restore()
 
     rank_log(global_rank, logger, "2D training successfully completed!")
 
@@ -316,7 +340,6 @@ def main():
     parser.add_argument("--seq_len", type=int, default=128)
     parser.add_argument("--log_interval", type=int, default=10)
     parser.add_argument("--gradient_checkpointing", action="store_true", default=False)
-    parser.add_argument("--head_sp", action="store_true", default=False)
     parser.add_argument(
         "--qwen_model_name",
         type=str,
@@ -336,6 +359,9 @@ def main():
         choices=["train", "validation", "test"],
     )
     parser.add_argument("--dcp-api", action="store_true", default=False)
+    parser.add_argument("--enable_ema", action="store_true", default=False)
+    parser.add_argument("--ema_decay", type=float, default=0.999)
+    parser.add_argument("--reshard_after_forward", action="store_true", default=False)
     args = parser.parse_args()
     train(args)
 

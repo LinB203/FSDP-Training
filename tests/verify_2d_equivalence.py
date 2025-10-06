@@ -11,7 +11,6 @@ python tests/verify_2d_equivalence.py --mode single --batch_size 1 --seq_len 128
 # adjust --nproc_per_node to number of local GPUs used for TP (e.g. 2)
 
 torchrun --nproc_per_node=2 tests/verify_2d_equivalence.py --mode dist --tp_size 2 --batch_size 1 --seq_len 128 --seed 1234
-torchrun --nproc_per_node=2 tests/verify_2d_equivalence.py --mode dist --tp_size 2 --batch_size 1 --seq_len 128 --seed 1234 --head_sp
 
 The script will print whether outputs match (within atol/rtol) and some diagnostics.
 """
@@ -36,11 +35,11 @@ from torch.distributed.fsdp import FSDPModule
 from torch.distributed.tensor.parallel import parallelize_module
 
 from utils.checkpoint import Checkpointer
-from utils.tp_plan import base_tp_plan, head_sp_tp_plan, tp_plan
+from utils.tp_plan import base_tp_plan, tp_plan
 from utils.fsdp2_warpper import FSDP2_warpper
 
 
-def build_model(tp_size: int, head_sp: bool):
+def build_model(tp_size: int):
     # model_size_cfg can be provided as dict to make it easy to adjust
     # test
     simple_model_config = ModelArgs(
@@ -49,7 +48,6 @@ def build_model(tp_size: int, head_sp: bool):
         n_heads=32,
         n_kv_heads=8,
         vocab_size=151936,
-        head_sp=head_sp,
         tp_size=tp_size,
     )
     model = Transformer.from_model_args(simple_model_config)
@@ -59,7 +57,7 @@ def build_model(tp_size: int, head_sp: bool):
 def single_run(args):
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     torch.manual_seed(args.seed)
-    model = build_model(args.tp_size, args.head_sp)
+    model = build_model(args.tp_size)
     torch.save(model.state_dict(), f"{args.result_output}/single_model_ckpt.pt")
     model.train()
     model.to(device)
@@ -155,14 +153,14 @@ def dist_run(args):
 
     # Build model with deterministic init (same seed as single)
     torch.manual_seed(args.seed)
-    model = build_model(tp_size=args.tp_size, head_sp=args.head_sp)
+    model = build_model(tp_size=args.tp_size)
     model.train()  # some wrappers want modules in train, but we'll eval later
     # apply parallelize_module to embeddings, norm, output same as your script
     model = parallelize_module(model, tp_mesh, base_tp_plan)
 
     # per-layer parallelize plan
     for layer_id, transformer_block in enumerate(model.layers):
-        layer_tp_plan = head_sp_tp_plan if args.head_sp else tp_plan
+        layer_tp_plan = tp_plan
         parallelize_module(
             module=transformer_block,
             device_mesh=tp_mesh,
@@ -301,7 +299,6 @@ def parse_args():
     p.add_argument("--batch_size", type=int, default=1)
     p.add_argument("--seq_len", type=int, default=128)
     p.add_argument("--seed", type=int, default=1234)
-    p.add_argument("--head_sp", action="store_true", default=False)
     p.add_argument("--atol", type=float, default=1e-5)
     p.add_argument("--rtol", type=float, default=1e-4)
     p.add_argument("--result_output", type=str, default="valid_tmp_output")
