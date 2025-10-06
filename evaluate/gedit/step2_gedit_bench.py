@@ -111,8 +111,10 @@ if __name__ == "__main__":
     backbone = args.backbone
 
     vie_score = VIEScore(backbone=backbone, task="tie", key_path="secret_t2.env")
-    max_workers = 16
-    dataset = load_dataset("stepfun-ai/GEdit-Bench")
+    max_workers = 64
+    dataset = load_dataset(
+        "stepfun-ai/GEdit-Bench", cache_dir="/mnt/data/lb/FSDP-Training/cache_dir"
+    )
 
     for model_name in evaluate_group:
         save_path = save_path_dir

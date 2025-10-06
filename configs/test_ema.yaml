@@ -1,7 +1,7 @@
 training_config:
   seed: 42
   mixed_bf16_precision: true
-  reshard_after_forward: false
+  reshard_after_forward: true
   num_to_explicit_prefetching: null
   gradient_checkpointing: true
   dcp_api: false
@@ -12,6 +12,7 @@ training_config:
   max_grad_norm: 1.0
   save_interval: 5
   enable_ema: true
+  ema_decay: 0.0
   output_dir: "checkpoints/test_ema"
   wandb_proj_name: "qwen-image-edit-train"
   wandb_run_name: "test_ema"
@@ -23,8 +24,8 @@ model_config:
   condition_processor_name_or_path: "/mnt/data/checkpoints/Qwen/Qwen-Image-Edit/processor"
   vae_name_or_path: "/mnt/data/checkpoints/Qwen/Qwen-Image-Edit/vae"
   scheduler_name_or_path: "/mnt/data/checkpoints/Qwen/Qwen-Image-Edit/scheduler"
-  test_num_layers: 4
-
+  test_num_layers: 2
+ 
 dataset_config:
   data_txt: /mnt/data/lb/FSDP-Training/configs/test.txt
   val_data_txt: /mnt/data/lb/FSDP-Training/configs/test_val.txt

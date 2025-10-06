@@ -11,7 +11,7 @@ allow_tf32: false
 output_dir: /mnt/data/lb/FSDP-Training/eval_output/gedit
 
 num_images_per_prompt: 1
-num_inference_steps: 28
+num_inference_steps: 20
 guidance_scale: 3.5
 
 gedit_prompt_path: gedit_edit.json

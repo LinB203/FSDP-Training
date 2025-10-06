@@ -124,7 +124,6 @@ if __name__ == "__main__":
         ModelArgs,
         TransformerBlock,
     )
-    from utils.ema import EMA
     from accelerate import init_empty_weights
 
     def setup_distributed_env():
@@ -144,31 +143,6 @@ if __name__ == "__main__":
     ori_ckpt = deepcopy(model.state_dict())
     FSDP2_mix_warpper(None, model, TransformerBlock)
     # model.to(device)
-    ema_model = EMA(
-        model,
-        decay=1.0,
-    )
-    ema_model.register()
-    ema_model.update()
-    # ema_model.state_dict_full_rank0_cpu("ema_model.pth")
-    # dist.barrier()
-    # if dist.get_rank() == 0:
-    #     ckpt = torch.load("/mnt/data/lb/FSDP-Training/ema_model.pth")
-    #     for k, v in ckpt.items():
-    #         diff = (v - ori_ckpt[k]).abs()
-    #         print(diff.mean(), diff.max(), diff.min())
-    #         # assert torch.allclose(v, ori_ckpt[k])
-
-    model.reshard()
-    ema_model.apply_shadow()
-    ema_model.restore()
-    model.reshard()
-
-    ema_model.update()
-    model.reshard()
-    ema_model.apply_shadow()
-    ema_model.restore()
-    model.reshard()
 """
 
 

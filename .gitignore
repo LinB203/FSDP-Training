@@ -3,4 +3,6 @@ checkpoints
 wandb/
 valid_tmp_output/
 tests/
-eval_output/
+eval_output*/
+*.lock
+cache_dir

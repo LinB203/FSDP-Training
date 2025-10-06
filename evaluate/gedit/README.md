@@ -79,6 +79,23 @@ torchrun \
   gedit.yaml \
   --model_name_or_path ${MODEL_PATH} \
   --output_dir ${OUTPUT_DIR}
+
+
+
+for step in $(seq 29000 1000 29000); do
+    MODEL_PATH="/mnt/data/lb/FSDP-Training/checkpoints/all_data/checkpoints-${step}/model_state_dict.pt"
+    OUTPUT_DIR="/mnt/data/lb/FSDP-Training/eval_output/gedit/${step}_model_state_dict"
+    torchrun \
+    --nproc_per_node=8 \
+    --nnodes=${WORLD_SIZE} \
+    --master_addr=${MASTER_ADDR} \
+    --master_port=${MASTER_PORT} \
+    -m step1_gen_samples \
+    gedit.yaml \
+    --model_name_or_path ${MODEL_PATH} \
+    --output_dir ${OUTPUT_DIR}
+done
+
 ```
 
 ### Evaluation
@@ -103,14 +120,16 @@ python step2_gedit_bench.py \
     --source_path ${GEDIT_ASSET}
 
 
-GEDIT_ASSET="/mnt/data/lb/Remake/FlowWorld/univa/eval/gedit/gedit_asset"
-OUTPUT_DIR='/mnt/data/lb/FSDP-Training/eval_output/gedit/qwen_image_edit'
-IMAGE_DIR=${OUTPUT_DIR}
-python step2_gedit_bench.py \
-    --model_name qwen_image_edit \
-    --save_path ${IMAGE_DIR} \
-    --backbone gpt4o \
-    --source_path ${GEDIT_ASSET}
+for step in 12000 13000 14000 16000 17000 20000 22000 23000 24000; do
+    OUTPUT_DIR="/mnt/data/lb/FSDP-Training/eval_output/gedit/${step}_model_state_dict"
+    GEDIT_ASSET="/mnt/data/lb/Remake/FlowWorld/univa/eval/gedit/gedit_asset"
+    IMAGE_DIR=${OUTPUT_DIR}
+    python step2_gedit_bench.py \
+        --model_name qwen_image_edit \
+        --save_path ${IMAGE_DIR} \
+        --backbone gpt4o \
+        --source_path ${GEDIT_ASSET}
+done
   
 ```
 
@@ -122,17 +141,21 @@ python step3_calculate_statistics.py \
     --model_name qwen_image_edit \
     --save_path ${IMAGE_DIR} \
     --backbone gpt4o \
-    --language en > ${IMAGE_DIR}.txt
+    --language cn > ${IMAGE_DIR}.txt
 cat ${IMAGE_DIR}.txt
 
-OUTPUT_DIR='/mnt/data/lb/FSDP-Training/eval_output/gedit/text_edit_data_test'
-IMAGE_DIR=${OUTPUT_DIR}
-python step3_calculate_statistics.py \
-    --model_name qwen_image_edit \
-    --save_path ${IMAGE_DIR} \
-    --backbone gpt4o \
-    --language en > ${IMAGE_DIR}.txt
-cat ${IMAGE_DIR}.txt
+for step in 25000; do
+    for lang in cn en; do
+        OUTPUT_DIR="/mnt/data/lb/FSDP-Training/eval_output/gedit/${step}_model_state_dict"
+        IMAGE_DIR=${OUTPUT_DIR}
+        python step3_calculate_statistics.py \
+            --model_name qwen_image_edit \
+            --save_path ${IMAGE_DIR} \
+            --backbone gpt4o \
+            --language ${lang} > ${IMAGE_DIR}_${lang}.txt
+        cat ${IMAGE_DIR}_${lang}.txt
+    done
+done
 
 
 

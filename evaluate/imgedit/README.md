@@ -46,6 +46,23 @@ WORLD_SIZE=${WORLD_SIZE:-1}
 
 # MODEL_PATH='/mnt/data/checkpoints/Qwen/Qwen-Image-Edit/transformer/merged.pt'
 # OUTPUT_DIR='/mnt/data/lb/FSDP-Training/eval_output/imgedit/qwen_image_edit'
+
+for step in 1000 6000 11000 16000 21000 26000 31000; do
+    for model_type in model_state_dict ema_model; do
+         MODEL_PATH="/mnt/data/lb/FSDP-Training/checkpoints/all_data/checkpoints-${step}/${model_type}.pt"
+         OUTPUT_DIR="/mnt/data/lb/FSDP-Training/eval_output/imgedit/${step}_${model_type}"
+         torchrun \
+         --nproc_per_node=8 \
+         --nnodes=${WORLD_SIZE} \
+         --master_addr=${MASTER_ADDR} \
+         --master_port=${MASTER_PORT} \
+         -m step1_gen_samples \
+         imgedit.yaml \
+         --model_name_or_path ${MODEL_PATH} \
+         --output_dir ${OUTPUT_DIR}
+    done
+done
+
 MODEL_PATH='/mnt/data/lb/FSDP-Training/checkpoints/checkpoints-6500/model_state_dict.pt'
 OUTPUT_DIR='/mnt/data/lb/FSDP-Training/eval_output/imgedit/text_edit_data_test'
 torchrun \

@@ -42,7 +42,6 @@ from models.transformer import (
     TransformerBlock,
 )
 from data.custom_dataset import CustomDataset
-from utils.ema import EMA
 from utils.configuration import Config
 from utils.checkpoint import Checkpointer
 from utils.merge_safetensors import load_safetensors
@@ -262,6 +261,12 @@ def train(args):
         msg = load_safetensors(model, args.training_config.weight_init)
         if global_rank == 0:
             print(f"Init weight from {args.training_config.weight_init}, {msg}")
+    else:
+        model.to_empty(device=device)
+        model.reset_parameters()
+        if global_rank == 0:
+            print(f"Train from scratch")
+
     if args.training_config.num_to_explicit_prefetching is not None:
         set_modules_to_forward_prefetch(
             model,
@@ -304,7 +309,17 @@ def train(args):
         args.training_config.output_dir,
         dcp_api=args.training_config.dcp_api,
         checkpoints_total_limit=args.training_config.checkpoints_total_limit,
+        model=model,
+        enable_ema=args.training_config.enable_ema,
+        decay=args.training_config.ema_decay,
+        fsdp_resharded=args.training_config.reshard_after_forward,
     )
+    if args.training_config.enable_ema:
+        torch.cuda.empty_cache()
+        if global_rank == 0:
+            print(
+                f"Fully_shard ema model, memory allocated: {get_memory_allocated()} GiB"
+            )
     resume_checkpoint_path, initial_global_step = checkpointer.get_resume_path(
         args.training_config.resume_from_checkpoint
     )
@@ -312,23 +327,6 @@ def train(args):
         checkpointer.load_model(model, resume_checkpoint_path)
         if global_rank == 0:
             print(f"Resume weight from {resume_checkpoint_path}")
-    elif args.training_config.weight_init is None:
-        model.to_empty(device=device)
-        model.reset_parameters()
-        if global_rank == 0:
-            print(f"Train from scratch")
-
-    if args.training_config.enable_ema:
-        ema_model = EMA(
-            model,
-            decay=args.training_config.ema_decay,
-            fsdp_resharded=args.training_config.reshard_after_forward,
-        )
-        torch.cuda.empty_cache()
-        if global_rank == 0:
-            print(
-                f"Fully_shard ema model, memory allocated: {get_memory_allocated()} GiB"
-            )
 
     # ---- prepare optimizer ----
     # if global_rank == 0:
@@ -434,10 +432,10 @@ def train(args):
             accum_loss = 0.0
 
             if args.training_config.enable_ema:
-                if ema_model.is_registered:
-                    ema_model.update()
+                if checkpointer.ema_is_registered:
+                    checkpointer.ema_update()
                 elif global_step >= args.training_config.ema_start_step:
-                    ema_model.register()
+                    checkpointer.ema_register()
 
             # logging
             if (
@@ -450,21 +448,6 @@ def train(args):
                     f"[{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Step[{global_step}]: loss-{avg:.6f}"
                 )
                 running_loss = 0.0
-
-            # checkpoint
-            if (
-                global_step != 0
-                and global_step % args.training_config.save_interval == 0
-            ):
-                checkpointer.save(model, optimizer, f"checkpoints-{global_step}")
-
-                if args.training_config.enable_ema and ema_model.is_registered:
-                    ema_model.state_dict_full_rank0_cpu(
-                        os.path.join(
-                            args.training_config.output_dir,
-                            f"checkpoints-{global_step}/ema_model.pt",
-                        )
-                    )
 
             # vis
             if (
@@ -493,13 +476,13 @@ def train(args):
                     log_pannel="vis",
                 )
 
-                if args.training_config.enable_ema and ema_model.is_registered:
+                if args.training_config.enable_ema and checkpointer.ema_is_registered:
                     torch.distributed.barrier()
                     for module in model.modules():
                         if isinstance(module, torch.distributed.fsdp.FSDPModule):
                             module.reshard()
                     torch.distributed.barrier()
-                    ema_model.apply_shadow()
+                    checkpointer.ema_apply_shadow()
                     torch.distributed.barrier()
                     log_validation(
                         pipe,
@@ -514,13 +497,19 @@ def train(args):
                         if isinstance(module, torch.distributed.fsdp.FSDPModule):
                             module.reshard()
                     torch.distributed.barrier()
-                    ema_model.restore()
+                    checkpointer.ema_restore()
                     torch.distributed.barrier()
                     for module in model.modules():
                         if isinstance(module, torch.distributed.fsdp.FSDPModule):
                             module.reshard()
                     torch.distributed.barrier()
                     torch.cuda.empty_cache()
+            # checkpoint
+            if (
+                global_step != 0
+                and global_step % args.training_config.save_interval == 0
+            ):
+                checkpointer.save(model, optimizer, f"checkpoints-{global_step}")
 
     if (batch_idx + 1) % grad_accum_steps != 0:
         optimizer.step()
