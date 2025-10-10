@@ -33,7 +33,7 @@ from diffusers.models.transformers.transformer_qwenimage import (
     QwenImageTransformerBlock,
 )
 from diffusers.schedulers import FlowMatchEulerDiscreteScheduler
-from diffusers import QwenImageEditPipeline
+from diffusers import QwenImageEditPlusPipeline
 
 # Import your model definition here
 from models.transformer import (
@@ -65,8 +65,8 @@ class DataCollator:
         self.processor = processor
 
     def __call__(self, instances: List[Dict]) -> Dict:
-        # List[str]
-        txt = [i["txt"] for i in instances]
+        # List[List[str]]
+        txt = [i["txt"][0] for i in instances]
         # List[PIL.Image]
         prompt_image = [i["prompt_image"] for i in instances]
         # List[Tensor], Tensor 1 3 h w, [-1, 1]
@@ -458,7 +458,7 @@ def train(args):
                     val_data = f.readlines()
                 val_data = [i.strip().split(",") for i in val_data]
                 val_data = [[i[0], ",".join(i[1:])] for i in val_data]
-                pipe = QwenImageEditPipeline(
+                pipe = QwenImageEditPlusPipeline(
                     transformer=model,
                     vae=vae,
                     text_encoder=condition_encoder,

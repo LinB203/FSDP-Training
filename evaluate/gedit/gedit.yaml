@@ -1,8 +1,8 @@
-model_name_or_path: "/mnt/data/checkpoints/Qwen/Qwen-Image-Edit/transformer/merged.pt"
-condition_encoder_name_or_path: "/mnt/data/checkpoints/Qwen/Qwen-Image-Edit/text_encoder"
-condition_processor_name_or_path: "/mnt/data/checkpoints/Qwen/Qwen-Image-Edit/processor"
-vae_name_or_path: "/mnt/data/checkpoints/Qwen/Qwen-Image-Edit/vae"
-scheduler_name_or_path: "/mnt/data/checkpoints/Qwen/Qwen-Image-Edit/scheduler"
+model_name_or_path: "/mnt/data/checkpoints/Qwen/Qwen-Image-Edit-2509/transformer/merged.pt"
+condition_encoder_name_or_path: "/mnt/data/checkpoints/Qwen/Qwen-Image-Edit-2509/text_encoder"
+condition_processor_name_or_path: "/mnt/data/checkpoints/Qwen/Qwen-Image-Edit-2509/processor"
+vae_name_or_path: "/mnt/data/checkpoints/Qwen/Qwen-Image-Edit-2509/vae"
+scheduler_name_or_path: "/mnt/data/checkpoints/Qwen/Qwen-Image-Edit-2509/scheduler"
 
 
 seed: 42

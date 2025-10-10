@@ -28,7 +28,7 @@ from transformers import (
 from accelerate import init_empty_weights
 from diffusers.schedulers import FlowMatchEulerDiscreteScheduler
 from diffusers.models import AutoencoderKLQwenImage
-from diffusers import QwenImageEditPipeline
+from diffusers import QwenImageEditPlusPipeline
 
 # Import your model definition here
 from models.transformer import (
@@ -84,7 +84,7 @@ def initialize_models(args, device):
     # model = torch.compile(model)
 
     # Load pipeline
-    pipe = QwenImageEditPipeline(
+    pipe = QwenImageEditPlusPipeline(
         transformer=model,
         vae=vae,
         text_encoder=condition_encoder,
@@ -132,7 +132,8 @@ def run_model_and_return_samples(args, state, text, image1=None, image2=None):
 
     with torch.no_grad():
         img = state["pipe"](**inputs).images
-    return [i.resize((ori_w, ori_h)) for i in img]
+    # return [i.resize((ori_w, ori_h)) for i in img]
+    return img
 
 
 def main(args):

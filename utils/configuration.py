@@ -36,6 +36,7 @@ class DatasetConfig:
 
     reversed_text_edit_ratio: float = 0.0
     box_guidance_text_edit_ratio: float = 0.0
+    drop_ratio: float = 0.1
 
 
 @dataclass

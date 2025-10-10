@@ -46,6 +46,6 @@ def load_safetensors(model: FSDPModule, last_model_checkpoint: str):
 if __name__ == "__main__":
     merge_weights_to_pt(
         QwenImageTransformer2DModel,
-        "/mnt/data/checkpoints/Qwen/Qwen-Image-Edit/transformer",
-        "/mnt/data/checkpoints/Qwen/Qwen-Image-Edit/transformer/merged.pt",
+        "/mnt/data/checkpoints/Qwen/Qwen-Image-Edit-2509/transformer",
+        "/mnt/data/checkpoints/Qwen/Qwen-Image-Edit-2509/transformer/merged.pt",
     )

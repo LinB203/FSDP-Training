@@ -68,8 +68,8 @@ WORLD_SIZE=${WORLD_SIZE:-1}
 
 # MODEL_PATH='/mnt/data/checkpoints/Qwen/Qwen-Image-Edit/transformer/merged.pt'
 # OUTPUT_DIR='/mnt/data/lb/FSDP-Training/eval_output/gedit/qwen_image_edit'
-MODEL_PATH='/mnt/data/lb/FSDP-Training/checkpoints/checkpoints-6500/model_state_dict.pt'
-OUTPUT_DIR='/mnt/data/lb/FSDP-Training/eval_output/gedit/text_edit_data_test'
+MODEL_PATH='/mnt/data/lb/FSDP-Training/checkpoints/all_data_nogpt_2509/checkpoints-5000/ema_model_state_dict.pt'
+OUTPUT_DIR='/mnt/data/lb/FSDP-Training/eval_output/gedit/qwen-edit-2509-ema5k-noresize'
 torchrun \
   --nproc_per_node=8 \
   --nnodes=${WORLD_SIZE} \
@@ -111,7 +111,8 @@ python step2_gedit_bench.py \
     --source_path ${GEDIT_ASSET}
     
 GEDIT_ASSET="/mnt/data/lb/Remake/FlowWorld/univa/eval/gedit/gedit_asset"
-OUTPUT_DIR='/mnt/data/lb/FSDP-Training/eval_output/gedit/text_edit_data_test'
+# OUTPUT_DIR='/mnt/data/lb/FSDP-Training/eval_output/gedit/gedit_uniworldv2_baseline__'
+OUTPUT_DIR="/mnt/data/lb/FSDP-Training/eval_output/gedit/gedit_uniworldv2_rl_300_seed0"
 IMAGE_DIR=${OUTPUT_DIR}
 python step2_gedit_bench.py \
     --model_name qwen_image_edit \
@@ -135,16 +136,18 @@ done
 
 ### Summary
 ```bash
-OUTPUT_DIR='/mnt/data/lb/FSDP-Training/eval_output/gedit/qwen_image_edit'
+OUTPUT_DIR=''
 IMAGE_DIR=${OUTPUT_DIR}
-python step3_calculate_statistics.py \
-    --model_name qwen_image_edit \
-    --save_path ${IMAGE_DIR} \
-    --backbone gpt4o \
-    --language cn > ${IMAGE_DIR}.txt
-cat ${IMAGE_DIR}.txt
+for lang in cn en; do
+    python step3_calculate_statistics.py \
+        --model_name qwen_image_edit \
+        --save_path ${IMAGE_DIR} \
+        --backbone gpt4o \
+        --language en > ${IMAGE_DIR}_${lang}.txt
+    cat ${IMAGE_DIR}_${lang}.txt
+done
 
-for step in 25000; do
+for step in 12000 13000 14000 16000 17000 20000 22000 23000 24000; do
     for lang in cn en; do
         OUTPUT_DIR="/mnt/data/lb/FSDP-Training/eval_output/gedit/${step}_model_state_dict"
         IMAGE_DIR=${OUTPUT_DIR}
@@ -164,14 +167,15 @@ done
 
 
 
-OUTPUT_DIR='/mnt/data/lb/FSDP-Training/eval_output/gedit/qwen_image_edit'
-IMAGE_DIR=${OUTPUT_DIR}
+
+# OUTPUT_DIR='/mnt/data/lb/FSDP-Training/eval_output/gedit/gedit_uniworldv2_baseline__'
+OUTPUT_DIR="/mnt/data/lb/FSDP-Training/eval_output/gedit/gedit_uniworldv2_rl_300_seed0"
 python step3_calculate_statistics.py \
     --model_name qwen_image_edit \
     --save_path ${IMAGE_DIR} \
     --backbone gpt4o \
-    --language cn > ${IMAGE_DIR}.txt
-cat ${IMAGE_DIR}.txt
+    --language en > ${IMAGE_DIR}_en.txt
+cat ${IMAGE_DIR}_en.txt
 
 OUTPUT_DIR='/mnt/data/lb/FSDP-Training/eval_output/gedit/text_edit_data_test'
 IMAGE_DIR=${OUTPUT_DIR}

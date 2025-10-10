@@ -1,0 +1,34 @@
+training_config:
+  seed: 42
+  mixed_bf16_precision: true
+  reshard_after_forward: false
+  num_to_explicit_prefetching: null
+  gradient_checkpointing: true
+  dcp_api: false
+  learning_rate: 1e-5
+  grad_accum_steps: 1
+  log_interval: 1
+  validation_steps: 1000
+  max_grad_norm: 1.0
+  save_interval: 1000
+  enable_ema: true
+  ema_decay: 0.999
+  output_dir: "checkpoints/all_data_nogpt_2509"
+  wandb_proj_name: "qwen-image-edit-train"
+  wandb_run_name: "all_data_nogpt_2509"
+  weight_init: "/mnt/data/checkpoints/Qwen/Qwen-Image-Edit-2509/transformer/merged.pt"
+  resume_from_checkpoint: "latest"
+
+model_config:
+  condition_encoder_name_or_path: "/mnt/data/checkpoints/Qwen/Qwen-Image-Edit-2509/text_encoder"
+  condition_processor_name_or_path: "/mnt/data/checkpoints/Qwen/Qwen-Image-Edit-2509/processor"
+  vae_name_or_path: "/mnt/data/checkpoints/Qwen/Qwen-Image-Edit-2509/vae"
+  scheduler_name_or_path: "/mnt/data/checkpoints/Qwen/Qwen-Image-Edit-2509/scheduler"
+
+dataset_config:
+  data_txt: /mnt/data/lb/FSDP-Training/configs/all_data_nogpt_2509.txt
+  val_data_txt: /mnt/data/lb/FSDP-Training/configs/all_val_data.txt
+  batch_size: 1
+  num_workers: 12
+  reversed_text_edit_ratio: 0.67
+  drop_ratio: 0.1

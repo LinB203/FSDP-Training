@@ -18,7 +18,7 @@ from pathlib import Path
 here = Path(__file__).resolve()
 project_root = here.parents[1]
 sys.path.insert(0, str(project_root))
-from utils.dataset_utils import PREFERRED_KONTEXT_RESOLUTIONS, calculate_dimensions
+from utils.dataset_utils import FluxKontextImageScale, calculate_dimensions
 
 text_edit_temp = [
     'change "{}" to "{}"',
@@ -116,6 +116,7 @@ class CustomDataset(Dataset):
         with open(data_txt, "r") as f:
             self.datasets = [line.strip() for line in f.readlines()]
         self.reversed_text_edit_ratio = args.dataset_config.reversed_text_edit_ratio
+        self.drop_ratio = args.dataset_config.drop_ratio
         self.box_guidance_text_edit_ratio = (
             args.dataset_config.box_guidance_text_edit_ratio
         )
@@ -123,7 +124,10 @@ class CustomDataset(Dataset):
         self._load_data()
 
         self.image_processor = image_processor
-        self.prompt_template_encode = "<|im_start|>system\nDescribe the key features of the input image (color, shape, size, texture, objects, background), then explain how the user's text instruction should alter or modify the image. Generate a new image that meets the user's requirements while maintaining consistency with the original input where appropriate.<|im_end|>\n<|im_start|>user\n<|vision_start|><|image_pad|><|vision_end|>{}<|im_end|>\n<|im_start|>assistant\n"
+        # qwen-edit
+        # self.prompt_template_encode = "<|im_start|>system\nDescribe the key features of the input image (color, shape, size, texture, objects, background), then explain how the user's text instruction should alter or modify the image. Generate a new image that meets the user's requirements while maintaining consistency with the original input where appropriate.<|im_end|>\n<|im_start|>user\n<|vision_start|><|image_pad|><|vision_end|>{}<|im_end|>\n<|im_start|>assistant\n"
+        # qwen-edit-2509
+        self.prompt_template_encode = "<|im_start|>system\nDescribe the key features of the input image (color, shape, size, texture, objects, background), then explain how the user's text instruction should alter or modify the image. Generate a new image that meets the user's requirements while maintaining consistency with the original input where appropriate.<|im_end|>\n<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n"
 
     def __len__(self):
         return len(self.data)
@@ -162,11 +166,22 @@ class CustomDataset(Dataset):
     def getitem(self, item):
         img_ref = Image.open(item["img_ref"]).convert("RGB")
         img_gt = Image.open(item["img_gt"]).convert("RGB")
-        w, h = img_ref.size
-        aspect_ratio = w / h
-        _, w, h = min(
-            (abs(aspect_ratio - w / h), w, h) for w, h in PREFERRED_KONTEXT_RESOLUTIONS
+        if "TextAtlas5M" in item["img_gt"]:
+            img_gt = FluxKontextImageScale(img_gt)
+
+        condition_ori_w, condition_ori_h = img_ref.size
+        if img_ref.size != img_gt.size:
+            img_gt = img_gt.resize(
+                (img_ref.size), resample=Image.BICUBIC
+            )  # to begin with, keep the same size
+        aspect_ratio = condition_ori_w / condition_ori_h
+        to_vae_w, to_vae_h, _ = calculate_dimensions(
+            1024 * 1024, aspect_ratio
+        )  # scale size by condition image
+        condition_width, condition_height, _ = calculate_dimensions(
+            384 * 384, aspect_ratio
         )
+
         if "rec_polys" in item:  # for text-edit
             ref_text = item["text"][0]
             gt_text = item["text"][1]
@@ -176,13 +191,6 @@ class CustomDataset(Dataset):
                 img_ref = img_gt
                 img_gt = tmp
                 prompt = random.choice(text_edit_temp).format(gt_text, ref_text)
-            elif self.box_guidance_text_edit_ratio > random.random():
-                img_ref = draw_red_box(img_ref, item["rec_polys"])
-                prompt = (
-                    random.choice(text_edit_temp).format(ref_text, gt_text)
-                    if random.random() > 0.5
-                    else random.choice(text_edit_temp_wbox).format(ref_text, gt_text)
-                )
         elif "aug_text" in item:  # for NHR-Edit
             if random.random() > 0.34:
                 prompt = random.choice(item["aug_text"])
@@ -191,17 +199,46 @@ class CustomDataset(Dataset):
         else:
             prompt = item["text"]
 
-        # w, h = 128, 128
-        img_ref = self.image_processor.resize(img_ref, h, w)
-        prompt_image = img_ref  # PIL.Image
+        prompt_image = self.image_processor.resize(
+            img_ref, condition_height, condition_width
+        )  # PIL.Image
+        img_ref = self.image_processor.resize(img_ref, to_vae_h, to_vae_w)
 
         # 3 1 h w, [-1, 1]
-        img_ref = self.image_processor.preprocess(img_ref, h, w).transpose(0, 1)
-        img_gt = self.image_processor.preprocess(img_gt, h, w).transpose(0, 1)
+        img_ref = self.image_processor.preprocess(
+            img_ref, to_vae_h, to_vae_w
+        ).transpose(0, 1)
+        img_gt = self.image_processor.preprocess(img_gt, to_vae_h, to_vae_w).transpose(
+            0, 1
+        )
+
+        txt = self._qwen_2509_prompt(
+            [prompt if self.drop_ratio < random.random() else ""]
+        )
+        return dict(
+            txt=txt,
+            prompt_image=prompt_image,
+            img_gt=img_gt,
+            img_ref=img_ref,
+        )
+
+    def _qwen_2509_prompt(self, prompt):
+        prompt = [prompt] if isinstance(prompt, str) else prompt
+        img_prompt_template = "Picture {}: <|vision_start|><|image_pad|><|vision_end|>"
+        # if isinstance(image, list):
+        #     base_img_prompt = ""
+        #     for i, img in enumerate(image):
+        #         base_img_prompt += img_prompt_template.format(i + 1)
+        # elif image is not None:
+        base_img_prompt = img_prompt_template.format(1)  # only 1 condition image
+        # else:
+        #     base_img_prompt = ""
 
         template = self.prompt_template_encode
-        txt = template.format(prompt)
-        return dict(txt=txt, prompt_image=prompt_image, img_gt=img_gt, img_ref=img_ref)
+
+        # drop_idx = self.prompt_template_encode_start_idx
+        txt = [template.format(base_img_prompt + e) for e in prompt]
+        return txt
 
 
 if __name__ == "__main__":

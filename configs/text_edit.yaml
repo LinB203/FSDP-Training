@@ -24,4 +24,4 @@ dataset_config:
   data_txt: /mnt/data/lb/FSDP-Training/configs/text_edit_data.txt
   val_data_txt: /mnt/data/lb/FSDP-Training/configs/text_edit_val_data.txt
   batch_size: 1
-  num_workers: 8
+  num_workers: 0

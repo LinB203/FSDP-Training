@@ -26,4 +26,4 @@ torchrun \
   --master_addr=${MASTER_ADDR} \
   --master_port=${MASTER_PORT} \
   train_fsdp.py \
-  configs/test_ema.yaml
+  configs/all_data_nogpt_2509.yaml
