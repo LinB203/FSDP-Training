@@ -227,16 +227,18 @@ class Checkpointer:
             torch.save(model_state_dict, new_model_checkpoint)
             torch.save(optim_state_dict, new_optim_checkpoint)
         torch.distributed.barrier()
-        cpu_state_dict = {}
-        for param_name, sharded_param in self.shadow.items():
-            full_param = sharded_param.full_tensor()
-            if torch.distributed.get_rank() == 0:
-                cpu_state_dict[param_name] = full_param.cpu()
-            else:
-                del full_param
+
+        
+        if not self.ema_is_registered:
+            return
+        model.reshard()
+        self.ema_apply_shadow()
+        model_state_dict = self._get_full_model_state_dict(model)
+        self.ema_restore()
+        model.reshard()
         if torch.distributed.get_rank() == 0:
             new_ema_model_checkpoint = f"{new_checkpoint_folder}/{EMA_MODEL_CHECKPOINT}"
-            torch.save(cpu_state_dict, new_ema_model_checkpoint)
+            torch.save(model_state_dict, new_ema_model_checkpoint)
         torch.distributed.barrier()
 
     def ema_register(self):
