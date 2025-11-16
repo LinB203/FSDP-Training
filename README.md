@@ -1,4 +1,5 @@
-A minimal parallel training example.
+**Main** branch is a minimal parallel training example.
+**Edit** branch is a fine-tune code for Qwen-Image-Edit.
 
 ## Env
 torch ≥ 2.8.0
