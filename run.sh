@@ -1,6 +1,5 @@
 #!/bin/bash
-export WANDB_MODE="online"
-export WANDB_API_KEY="953e958793b218efb850fa194e85843e2c3bd88b"
+export WANDB_MODE="offline"
 
 export TOKENIZERS_PARALLELISM=true
 
